@@ -256,6 +256,69 @@ def _ensure_tcl_tk_in_dist(dist_path: Path) -> None:
         print(f"  [错误] 无法找到 TK 数据目录!")
 
 
+USER_DATA_ITEMS = (
+    "page_profiles.json",   # user's saved page configs
+    "page_refs",            # user's reference screenshots
+    "captures",             # past collection sessions (don't lose data)
+)
+
+
+def _backup_user_data(dist_dir: Path) -> dict[str, Path]:
+    """
+    Move user data out of the dist output directory so PyInstaller --noconfirm
+    doesn't wipe it. Returns a dict mapping item name -> backup path.
+    Backup lives next to dist/ so it's safe from rebuilds.
+    """
+    backups: dict[str, Path] = {}
+    if not dist_dir.exists():
+        return backups
+
+    backup_root = dist_dir.parent / ".user_data_backup"
+    if backup_root.exists():
+        shutil.rmtree(backup_root, ignore_errors=True)
+    backup_root.mkdir(parents=True, exist_ok=True)
+
+    for item in USER_DATA_ITEMS:
+        src = dist_dir / item
+        if not src.exists():
+            continue
+        dst = backup_root / item
+        try:
+            shutil.move(str(src), str(dst))
+            backups[item] = dst
+            print(f"  [备份] {item} -> {dst}")
+        except Exception as exc:
+            print(f"  [警告] 备份 {item} 失败: {exc}")
+
+    return backups
+
+
+def _restore_user_data(dist_dir: Path, backups: dict[str, Path]) -> None:
+    """Move backed-up user data back into the (newly built) dist directory."""
+    if not backups:
+        return
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    for item, backup_path in backups.items():
+        target = dist_dir / item
+        if not backup_path.exists():
+            continue
+        try:
+            if target.exists():
+                # Should not happen, but merge: keep user data, drop fresh files
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            shutil.move(str(backup_path), str(target))
+            print(f"  [恢复] {item} -> {target}")
+        except Exception as exc:
+            print(f"  [警告] 恢复 {item} 失败: {exc}")
+
+    backup_root = dist_dir.parent / ".user_data_backup"
+    if backup_root.exists():
+        shutil.rmtree(backup_root, ignore_errors=True)
+
+
 def build(onedir: bool = False) -> None:
     preflight_check()
 
@@ -348,18 +411,34 @@ def build(onedir: bool = False) -> None:
     print("=" * 60)
     print(f"\n执行命令:\n  {' '.join(cmd)}\n")
 
+    # Compute output path early so we can backup user data before PyInstaller
+    # wipes the directory (--noconfirm deletes the entire output dir).
+    if onedir:
+        out = root / "dist" / APP_NAME
+    else:
+        suffix = ".exe" if is_win else ""
+        out = root / "dist" / f"{APP_NAME}{suffix}"
+
+    backups: dict[str, Path] = {}
+    if onedir and out.is_dir():
+        print("\n  --- 备份用户数据 ---")
+        backups = _backup_user_data(out)
+        if not backups:
+            print("  (无现存用户数据需要备份)")
+        print("  ---")
+
     result = subprocess.run(cmd, cwd=str(root))
 
     if result.returncode == 0:
-        if onedir:
-            out = root / "dist" / APP_NAME
-        else:
-            suffix = ".exe" if is_win else ""
-            out = root / "dist" / f"{APP_NAME}{suffix}"
-
         # Post-build: ensure TCL/TK data is present (Windows onedir)
         if is_win and onedir and out.is_dir():
             _ensure_tcl_tk_in_dist(out)
+
+        # Restore user data into the freshly built dist
+        if backups:
+            print("\n  --- 恢复用户数据 ---")
+            _restore_user_data(out, backups)
+            print("  ---")
 
         write_build_sha(out)
 
@@ -371,6 +450,11 @@ def build(onedir: bool = False) -> None:
             print(f"  文件大小: {size_mb:.1f} MB")
         print("=" * 60)
     else:
+        # Even on failure, restore user data so we don't lose it
+        if backups:
+            print("\n  --- 构建失败，恢复用户数据 ---")
+            out.mkdir(parents=True, exist_ok=True)
+            _restore_user_data(out, backups)
         print(f"\n[错误] 打包失败，退出码: {result.returncode}")
         sys.exit(result.returncode)
 
