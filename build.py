@@ -171,6 +171,7 @@ def build(onedir: bool = False) -> None:
     cmd.extend(["--add-data", f"src{sep}src"])
 
     # Include TCL/TK data (fixes "Tcl data directory not found" on Windows)
+    # PyInstaller 6+ expects these at _tcl_data and _tk_data inside _internal/
     if is_win:
         try:
             import tkinter
@@ -179,11 +180,13 @@ def build(onedir: bool = False) -> None:
             tk_lib = tk_root.tk.exprstring("$tk_library")
             tk_root.destroy()
             if os.path.isdir(tcl_lib):
-                cmd.extend(["--add-data", f"{tcl_lib}{sep}tcl"])
+                cmd.extend(["--add-data", f"{tcl_lib}{sep}_tcl_data"])
+                print(f"  TCL data: {tcl_lib}")
             if os.path.isdir(tk_lib):
-                cmd.extend(["--add-data", f"{tk_lib}{sep}tk"])
-        except Exception:
-            pass
+                cmd.extend(["--add-data", f"{tk_lib}{sep}_tk_data"])
+                print(f"  TK data:  {tk_lib}")
+        except Exception as e:
+            print(f"  [警告] 无法自动定位 TCL/TK: {e}")
 
     # Windows: embed icon if available
     icon_path = root / "assets" / "icon.ico"
