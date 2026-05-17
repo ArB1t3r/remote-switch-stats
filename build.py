@@ -137,17 +137,25 @@ def _find_tcl_tk_dirs() -> tuple[str, str]:
     try:
         import tkinter
         tcl = tkinter.Tcl()
-        tcl_lib = tcl.eval("info library")
+        tcl_lib = os.path.abspath(tcl.eval("info library"))
         # TK library is usually a sibling directory
-        tk_version = tcl.eval("package require Tk")
-        tk_lib = os.path.join(os.path.dirname(tcl_lib), f"tk{tk_version}")
-        if not os.path.isdir(tk_lib):
-            # Try without minor version
-            major_minor = ".".join(tk_version.split(".")[:2])
-            tk_lib = os.path.join(os.path.dirname(tcl_lib), f"tk{major_minor}")
+        try:
+            tk_version = tcl.eval("package require Tk")
+            tk_lib = os.path.join(os.path.dirname(tcl_lib), f"tk{tk_version}")
+            if not os.path.isdir(tk_lib):
+                major_minor = ".".join(tk_version.split(".")[:2])
+                tk_lib = os.path.join(os.path.dirname(tcl_lib), f"tk{major_minor}")
+        except Exception:
+            # Tk package might not load without display, find tk dir by pattern
+            parent = os.path.dirname(tcl_lib)
+            for name in sorted(os.listdir(parent), reverse=True):
+                if name.startswith("tk") and os.path.isdir(os.path.join(parent, name)):
+                    tk_lib = os.path.join(parent, name)
+                    break
         tcl.destroy()
-    except Exception:
-        pass
+        print(f"  [TCL/TK 定位] Strategy 1 - Tcl(): tcl={tcl_lib}, tk={tk_lib}")
+    except Exception as e:
+        print(f"  [TCL/TK 定位] Strategy 1 failed: {e}")
 
     # Strategy 2: Search common locations relative to sys.prefix
     if not tcl_lib or not os.path.isdir(tcl_lib):
@@ -156,14 +164,16 @@ def _find_tcl_tk_dirs() -> tuple[str, str]:
             prefix / "tcl",
             prefix / "lib",
             prefix / "Library" / "lib",
+            prefix / "Lib",
         ]
         for base in candidates:
             if not base.is_dir():
                 continue
             for d in sorted(base.iterdir(), reverse=True):
-                if d.name.startswith("tcl8") or d.name.startswith("tcl9"):
+                if (d.name.startswith("tcl8") or d.name.startswith("tcl9")) and d.is_dir():
                     if (d / "init.tcl").exists():
-                        tcl_lib = str(d)
+                        tcl_lib = str(d.resolve())
+                        print(f"  [TCL/TK 定位] Strategy 2 - found tcl: {tcl_lib}")
                         break
             if tcl_lib:
                 break
@@ -172,19 +182,28 @@ def _find_tcl_tk_dirs() -> tuple[str, str]:
         if tcl_lib:
             parent = Path(tcl_lib).parent
             for d in sorted(parent.iterdir(), reverse=True):
-                if d.name.startswith("tk8") or d.name.startswith("tk9"):
-                    tk_lib = str(d)
+                if (d.name.startswith("tk8") or d.name.startswith("tk9")) and d.is_dir():
+                    tk_lib = str(d.resolve())
+                    print(f"  [TCL/TK 定位] Strategy 2 - found tk: {tk_lib}")
                     break
 
     # Strategy 3: Use environment variables
     if not tcl_lib or not os.path.isdir(tcl_lib):
         env_tcl = os.environ.get("TCL_LIBRARY", "")
         if env_tcl and os.path.isdir(env_tcl):
-            tcl_lib = env_tcl
+            tcl_lib = os.path.abspath(env_tcl)
+            print(f"  [TCL/TK 定位] Strategy 3 - env TCL_LIBRARY: {tcl_lib}")
     if not tk_lib or not os.path.isdir(tk_lib):
         env_tk = os.environ.get("TK_LIBRARY", "")
         if env_tk and os.path.isdir(env_tk):
-            tk_lib = env_tk
+            tk_lib = os.path.abspath(env_tk)
+            print(f"  [TCL/TK 定位] Strategy 3 - env TK_LIBRARY: {tk_lib}")
+
+    # Final validation: ensure both are absolute and exist
+    if tcl_lib and not os.path.isabs(tcl_lib):
+        tcl_lib = os.path.abspath(tcl_lib)
+    if tk_lib and not os.path.isabs(tk_lib):
+        tk_lib = os.path.abspath(tk_lib)
 
     return tcl_lib, tk_lib
 
@@ -272,15 +291,28 @@ def build(onedir: bool = False) -> None:
     # Include TCL/TK data (fixes "Tcl data directory not found" on Windows)
     # PyInstaller 6+ expects these at _tcl_data and _tk_data inside _internal/
     if is_win:
+        print("\n  --- TCL/TK 数据定位 ---")
         tcl_lib, tk_lib = _find_tcl_tk_dirs()
-        if tcl_lib and os.path.isdir(tcl_lib):
-            cmd.extend(["--add-data", f"{tcl_lib}{sep}_tcl_data"])
-            print(f"  TCL data: {tcl_lib}")
-        if tk_lib and os.path.isdir(tk_lib):
-            cmd.extend(["--add-data", f"{tk_lib}{sep}_tk_data"])
-            print(f"  TK data:  {tk_lib}")
-        if not tcl_lib or not tk_lib:
-            print(f"  [警告] 未找到 TCL/TK 数据目录，构建后将尝试手动复制")
+        tcl_ok = tcl_lib and os.path.isdir(tcl_lib)
+        tk_ok = tk_lib and os.path.isdir(tk_lib)
+
+        if tcl_ok:
+            add_data_tcl = f"{tcl_lib}{sep}_tcl_data"
+            cmd.extend(["--add-data", add_data_tcl])
+            print(f"  --add-data \"{add_data_tcl}\"")
+        else:
+            print(f"  [警告] TCL 数据目录未找到 (tcl_lib={tcl_lib!r})")
+
+        if tk_ok:
+            add_data_tk = f"{tk_lib}{sep}_tk_data"
+            cmd.extend(["--add-data", add_data_tk])
+            print(f"  --add-data \"{add_data_tk}\"")
+        else:
+            print(f"  [警告] TK 数据目录未找到 (tk_lib={tk_lib!r})")
+
+        if not tcl_ok or not tk_ok:
+            print(f"  构建后将尝试手动复制 (post-build fix)")
+        print("  ---")
 
     # Windows: embed icon if available
     icon_path = root / "assets" / "icon.ico"
