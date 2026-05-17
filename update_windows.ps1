@@ -18,6 +18,31 @@ foreach ($v in $envVarsToClean) {
     }
 }
 
+# CRITICAL: Wait for any running SwitchRemote.exe to exit. Otherwise its
+# loaded DLLs and font files (e.g. customtkinter Roboto-Medium.ttf) keep
+# a Windows file lock that breaks PyInstaller's COLLECT step which tries
+# to wipe dist/SwitchRemote/ before writing the new build.
+$processName = "SwitchRemote"
+$waited = 0
+$maxWait = 20
+while ($waited -lt $maxWait) {
+    $running = Get-Process -Name $processName -ErrorAction SilentlyContinue
+    if (-not $running) { break }
+    if ($waited -eq 0) {
+        Write-Host "  Waiting for SwitchRemote.exe to fully exit..." -ForegroundColor DarkYellow
+    }
+    Start-Sleep -Milliseconds 500
+    $waited++
+}
+$stillRunning = Get-Process -Name $processName -ErrorAction SilentlyContinue
+if ($stillRunning) {
+    Write-Host "  Force-stopping lingering SwitchRemote.exe processes..." -ForegroundColor DarkYellow
+    try {
+        Stop-Process -Name $processName -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    } catch { }
+}
+
 $OWNER = "ArB1t3r"
 $REPO = "remote-switch-stats"
 $BRANCH = "main"

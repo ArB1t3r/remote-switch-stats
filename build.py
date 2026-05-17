@@ -29,6 +29,7 @@ import json
 import platform
 import shutil
 import subprocess
+import time
 import urllib.request
 from pathlib import Path
 
@@ -263,6 +264,29 @@ USER_DATA_ITEMS = (
 )
 
 
+def _force_clean_dist(dist_dir: Path, max_attempts: int = 5) -> bool:
+    """
+    Aggressively try to delete the dist folder. PyInstaller's --noconfirm
+    fails immediately on Windows file locks (commonly held by a still-exiting
+    old exe). We retry with backoff so that transient locks resolve.
+    """
+    for attempt in range(1, max_attempts + 1):
+        if not dist_dir.exists():
+            return True
+        try:
+            shutil.rmtree(dist_dir)
+            return True
+        except PermissionError as exc:
+            print(f"  [清理 {attempt}/{max_attempts}] 文件被占用，等待释放: {exc}")
+            time.sleep(1.5)
+        except OSError as exc:
+            print(f"  [清理 {attempt}/{max_attempts}] 删除失败: {exc}")
+            time.sleep(1.5)
+
+    print(f"  [警告] 无法清理 {dist_dir}，可能仍有进程占用文件")
+    return False
+
+
 def _backup_user_data(dist_dir: Path) -> dict[str, Path]:
     """
     Move user data out of the dist output directory so PyInstaller --noconfirm
@@ -427,7 +451,25 @@ def build(onedir: bool = False) -> None:
             print("  (无现存用户数据需要备份)")
         print("  ---")
 
-    result = subprocess.run(cmd, cwd=str(root))
+    # Pre-clean: actively try to remove the old dist folder ourselves with
+    # retries. PyInstaller's --noconfirm uses a single shutil.rmtree call
+    # which fails immediately on Windows file locks. Doing it ourselves with
+    # retries lets us survive transient locks (e.g. an exiting old exe).
+    if is_win and onedir and out.is_dir():
+        _force_clean_dist(out)
+
+    # Retry the build a couple of times to survive transient file-lock errors.
+    max_attempts = 3
+    result = None
+    for attempt in range(1, max_attempts + 1):
+        if attempt > 1:
+            print(f"\n[重试 {attempt}/{max_attempts}] 等待文件锁释放...")
+            time.sleep(3)
+            if is_win and onedir and out.is_dir():
+                _force_clean_dist(out)
+        result = subprocess.run(cmd, cwd=str(root))
+        if result.returncode == 0:
+            break
 
     if result.returncode == 0:
         # Post-build: ensure TCL/TK data is present (Windows onedir)
