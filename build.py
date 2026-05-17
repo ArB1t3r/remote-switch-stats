@@ -23,6 +23,10 @@ ENTRY = "main.py"
 
 HIDDEN_IMPORTS = [
     "customtkinter",
+    "tkinter",
+    "_tkinter",
+    "tkinter.messagebox",
+    "tkinter.filedialog",
     "PIL",
     "PIL.Image",
     "PIL.ImageTk",
@@ -30,6 +34,7 @@ HIDDEN_IMPORTS = [
 
 COLLECT_PACKAGES = [
     "customtkinter",
+    "tkinter",
 ]
 
 
