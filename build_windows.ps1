@@ -2,11 +2,15 @@
 # Usage: Right-click -> Run with PowerShell
 #   or:  powershell -ExecutionPolicy Bypass -File build_windows.ps1
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
+
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "  Switch Remote Control - Windows Build Tool" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
+
+# -- pip mirror: use Tsinghua mirror for faster downloads in China --
+$PIP_MIRROR = "-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
 
 # Step 1: Find Python
 Write-Host "[1/6] Detecting Python..." -ForegroundColor Yellow
@@ -14,7 +18,7 @@ $pycmd = $null
 
 foreach ($cmd in @("py", "python", "python3")) {
     try {
-        $ver = & $cmd --version 2>&1
+        $null = & $cmd --version 2>&1
         if ($LASTEXITCODE -eq 0) {
             $pycmd = $cmd
             break
@@ -24,6 +28,7 @@ foreach ($cmd in @("py", "python", "python3")) {
 
 if (-not $pycmd) {
     $searchPaths = @(
+        "$env:LOCALAPPDATA\Programs\Python\Python314\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
@@ -89,8 +94,11 @@ if (Test-Path ".venv\Scripts\Activate.ps1") {
 # Step 4: Install dependencies
 Write-Host ""
 Write-Host "[4/6] Installing project dependencies..." -ForegroundColor Yellow
-python -m pip install --upgrade pip -q 2>&1 | Out-Null
-pip install -r requirements.txt -q
+Write-Host "  (Using Tsinghua mirror for faster downloads)"
+$pipCmd = "python -m pip install --upgrade pip $PIP_MIRROR"
+Invoke-Expression $pipCmd 2>&1 | Out-Null
+$pipCmd = "pip install -r requirements.txt $PIP_MIRROR"
+Invoke-Expression $pipCmd
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  [ERROR] Failed to install dependencies" -ForegroundColor Red
     Read-Host "Press Enter to exit"
@@ -101,7 +109,8 @@ Write-Host "  Dependencies installed" -ForegroundColor Green
 # Step 5: Install PyInstaller
 Write-Host ""
 Write-Host "[5/6] Installing PyInstaller..." -ForegroundColor Yellow
-pip install pyinstaller -q
+$pipCmd = "pip install pyinstaller $PIP_MIRROR"
+Invoke-Expression $pipCmd
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  [ERROR] Failed to install PyInstaller" -ForegroundColor Red
     Read-Host "Press Enter to exit"

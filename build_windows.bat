@@ -54,15 +54,16 @@ if !errorlevel! neq 0 (echo [ERROR] Failed to create venv & pause & exit /b 1)
 echo   .venv created
 )
 call .venv\Scripts\activate.bat
+set "PIP_MIRROR=-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
 echo.
-echo [4/6] Installing project dependencies...
-python -m pip install --upgrade pip -q 2>nul
-pip install -r requirements.txt -q
+echo [4/6] Installing project dependencies (Tsinghua mirror)...
+python -m pip install --upgrade pip !PIP_MIRROR! -q 2>nul
+pip install -r requirements.txt !PIP_MIRROR! -q
 if !errorlevel! neq 0 (echo [ERROR] Failed to install dependencies & pause & exit /b 1)
 echo   Dependencies installed
 echo.
 echo [5/6] Installing PyInstaller...
-pip install pyinstaller -q
+pip install pyinstaller !PIP_MIRROR! -q
 if !errorlevel! neq 0 (echo [ERROR] Failed to install PyInstaller & pause & exit /b 1)
 echo   PyInstaller installed
 echo.
