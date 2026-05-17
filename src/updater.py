@@ -118,13 +118,17 @@ def check_for_update_async(callback: Callable[[UpdateInfo], None]) -> None:
 
 def _find_update_script() -> Path | None:
     """Locate update_windows.ps1 by checking multiple candidate directories."""
+    exe_dir = Path(sys.executable).parent
     candidates = [
-        Path(sys.executable).parent / "update_windows.ps1",
-        Path(sys.executable).parent.parent / "update_windows.ps1",
+        exe_dir / "update_windows.ps1",
+        exe_dir.parent / "update_windows.ps1",
+        exe_dir.parent.parent / "update_windows.ps1",
         Path(__file__).resolve().parent.parent / "update_windows.ps1",
     ]
     if hasattr(sys, "_MEIPASS"):
-        candidates.insert(0, Path(sys._MEIPASS).parent / "update_windows.ps1")
+        meipass = Path(sys._MEIPASS)
+        candidates.insert(0, meipass.parent / "update_windows.ps1")
+        candidates.insert(1, meipass.parent.parent / "update_windows.ps1")
 
     for path in candidates:
         if path.exists():

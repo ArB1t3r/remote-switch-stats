@@ -134,14 +134,21 @@ Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host "  BUILD COMPLETE!" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Output: dist\SwitchRemote.exe"
-Write-Host ""
-Write-Host "  You can copy this .exe to any Windows PC."
-Write-Host "  No Python or dependencies needed to run it."
+if (Test-Path "dist\SwitchRemote\SwitchRemote.exe") {
+    Write-Host "  Output: dist\SwitchRemote\SwitchRemote.exe"
+    Write-Host ""
+    Write-Host "  Copy the entire 'dist\SwitchRemote' folder to any Windows PC."
+    Write-Host "  Run SwitchRemote.exe inside that folder. No Python needed."
+} else {
+    Write-Host "  Output: dist\SwitchRemote.exe"
+    Write-Host ""
+    Write-Host "  You can copy this .exe to any Windows PC."
+}
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host ""
 
+$exePath = if (Test-Path "dist\SwitchRemote\SwitchRemote.exe") { "dist\SwitchRemote\SwitchRemote.exe" } else { "dist\SwitchRemote.exe" }
 $run = Read-Host "Launch now? (Y/N)"
 if ($run -eq "Y" -or $run -eq "y") {
-    Start-Process "dist\SwitchRemote.exe"
+    Start-Process $exePath
 }

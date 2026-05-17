@@ -134,9 +134,12 @@ Write-Host ""
 
 $run = Read-Host "Launch the updated app now? (Y/N)"
 if ($run -eq "Y" -or $run -eq "y") {
-    $exe = Join-Path $targetRoot "dist\SwitchRemote.exe"
-    if (Test-Path $exe) {
-        Start-Process $exe
+    $exeDir = Join-Path $targetRoot "dist\SwitchRemote\SwitchRemote.exe"
+    $exeFile = Join-Path $targetRoot "dist\SwitchRemote.exe"
+    if (Test-Path $exeDir) {
+        Start-Process $exeDir
+    } elseif (Test-Path $exeFile) {
+        Start-Process $exeFile
     } else {
         Write-Host "  [WARNING] Executable not found at expected path" -ForegroundColor DarkYellow
     }

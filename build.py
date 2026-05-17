@@ -142,6 +142,11 @@ def build(onedir: bool = False) -> None:
         print("[提示] macOS 上自动切换为 onedir 模式")
         onedir = True
 
+    # Windows: onedir is more reliable (avoids temp extraction issues with tkinter)
+    if is_win and not onedir:
+        print("[提示] Windows 上自动切换为 onedir 模式（避免 tkinter DLL 提取问题）")
+        onedir = True
+
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
