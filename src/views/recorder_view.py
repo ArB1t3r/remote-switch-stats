@@ -247,12 +247,23 @@ class RecorderView(ctk.CTkFrame):
             is_selected = (i == self._selected_idx)
             is_drag_target = (i == self._drag_target)
 
-            row = ctk.CTkFrame(
-                self._steps_scroll, height=32, corner_radius=6,
-                fg_color="#4f46e5" if is_selected else ("#334155" if is_drag_target else "transparent"),
-                border_width=1 if is_drag_target else 0,
-                border_color="#6366f1" if is_drag_target else "transparent",
-            )
+            if is_selected:
+                bg = "#4f46e5"
+            elif is_drag_target:
+                bg = "#334155"
+            else:
+                bg = "transparent"
+
+            frame_kwargs = {
+                "height": 32,
+                "corner_radius": 6,
+                "fg_color": bg,
+            }
+            if is_drag_target:
+                frame_kwargs["border_width"] = 1
+                frame_kwargs["border_color"] = "#6366f1"
+
+            row = ctk.CTkFrame(self._steps_scroll, **frame_kwargs)
             row.pack(fill="x", padx=2, pady=1)
             row.pack_propagate(False)
 
