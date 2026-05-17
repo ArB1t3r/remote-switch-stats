@@ -11,6 +11,7 @@ Windows 用户请直接双击 build_windows.bat，会自动处理所有环境依
 
 import argparse
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -168,6 +169,21 @@ def build(onedir: bool = False) -> None:
 
     sep = ";" if is_win else ":"
     cmd.extend(["--add-data", f"src{sep}src"])
+
+    # Include TCL/TK data (fixes "Tcl data directory not found" on Windows)
+    if is_win:
+        try:
+            import tkinter
+            tk_root = tkinter.Tk()
+            tcl_lib = tk_root.tk.exprstring("$tcl_library")
+            tk_lib = tk_root.tk.exprstring("$tk_library")
+            tk_root.destroy()
+            if os.path.isdir(tcl_lib):
+                cmd.extend(["--add-data", f"{tcl_lib}{sep}tcl"])
+            if os.path.isdir(tk_lib):
+                cmd.extend(["--add-data", f"{tk_lib}{sep}tk"])
+        except Exception:
+            pass
 
     # Windows: embed icon if available
     icon_path = root / "assets" / "icon.ico"
