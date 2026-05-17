@@ -1,6 +1,7 @@
 """Controller simulation tab — buttons, D-pad, joysticks, touch."""
 
 import threading
+import time
 import customtkinter as ctk
 
 from src.protocol import SwitchConnection, BUTTONS
@@ -19,6 +20,11 @@ class ControllerView(ctk.CTkFrame):
         self._conn = conn
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
+
+        self._stick_pending: dict[str, tuple[int, int] | None] = {"LEFT": None, "RIGHT": None}
+        self._stick_sending: dict[str, bool] = {"LEFT": False, "RIGHT": False}
+        self._stick_lock = threading.Lock()
+
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -185,7 +191,11 @@ class ControllerView(ctk.CTkFrame):
 
     def _click_btn(self, button: str) -> None:
         self._log(f"click {button}")
-        threading.Thread(target=lambda: self._conn.click(button), daemon=True).start()
+
+        def _task() -> None:
+            self._conn.click(button)
+
+        threading.Thread(target=_task, daemon=True).start()
 
     def _dpad_click(self, button: str) -> None:
         self._click_btn(button)
@@ -193,10 +203,25 @@ class ControllerView(ctk.CTkFrame):
     def _stick_move(self, stick: str, x: int, y: int) -> None:
         label_w = self._lstick_label if stick == "LEFT" else self._rstick_label
         label_w.configure(text=f"X: {x}  Y: {y}")
-        threading.Thread(
-            target=lambda: self._conn.set_stick(stick, x, y),
-            daemon=True,
-        ).start()
+
+        with self._stick_lock:
+            self._stick_pending[stick] = (x, y)
+            if self._stick_sending[stick]:
+                return
+            self._stick_sending[stick] = True
+
+        threading.Thread(target=self._stick_sender, args=(stick,), daemon=True).start()
+
+    def _stick_sender(self, stick: str) -> None:
+        """Drain pending stick values, only sending the latest position."""
+        while True:
+            with self._stick_lock:
+                pos = self._stick_pending[stick]
+                self._stick_pending[stick] = None
+                if pos is None:
+                    self._stick_sending[stick] = False
+                    return
+            self._conn.set_stick(stick, pos[0], pos[1])
 
     def _detach(self) -> None:
         self._log("detachController")
