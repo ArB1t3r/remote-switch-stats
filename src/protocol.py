@@ -101,6 +101,7 @@ class SwitchConnection:
             return f"连接失败: {e}"
 
     def disconnect(self) -> None:
+        self._reconnecting = True  # prevent any reconnect attempt during disconnect
         with self._lock:
             if self._sock:
                 try:
@@ -108,7 +109,8 @@ class SwitchConnection:
                 except OSError:
                     pass
                 self._sock = None
-            self._notify(False)
+        self._reconnecting = False
+        self._notify(False)
 
     def reconnect(self) -> str:
         if self._ip is None:

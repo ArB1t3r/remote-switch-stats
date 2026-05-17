@@ -63,22 +63,35 @@ class SetupView(ctk.CTkFrame):
         if not ip:
             self._connect_msg.configure(text="请输入 Switch IP 地址", text_color="#ef4444")
             return
+        self._connect_btn.configure(state="disabled")
         self._connect_msg.configure(text="正在连接…", text_color="#eab308")
 
         def _task() -> None:
+            self._conn.auto_reconnect = False
             msg = self._conn.connect(ip)
+            self._conn.auto_reconnect = True
             self.after(0, lambda: self._connect_msg.configure(
                 text=msg,
                 text_color="#22c55e" if self._conn.connected else "#ef4444",
             ))
+            self.after(0, lambda: self._connect_btn.configure(state="normal"))
             if self._conn.connected:
-                self.after(100, self._fetch_info)
+                self._fetch_info()
 
         threading.Thread(target=_task, daemon=True).start()
 
     def _do_disconnect(self) -> None:
-        self._conn.disconnect()
-        self._connect_msg.configure(text="已断开连接", text_color="#9ca3af")
+        self._conn.auto_reconnect = False
+
+        def _task() -> None:
+            self._conn.disconnect()
+            self._conn.auto_reconnect = True
+            self.after(0, lambda: self._connect_msg.configure(text="已断开连接", text_color="#9ca3af"))
+            self.after(0, self._clear_info)
+
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _clear_info(self) -> None:
         self._info_text.configure(state="normal")
         self._info_text.delete("1.0", "end")
         self._info_text.configure(state="disabled")
