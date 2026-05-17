@@ -1,13 +1,14 @@
 """Main application window — tabbed interface hosting all views."""
 
 import sys
+import threading
 import customtkinter as ctk
 from tkinter import messagebox
 
-from src import APP_VERSION
+from src import APP_VERSION, theme
 from src.protocol import SwitchConnection
 from src.updater import UpdateInfo, check_for_update_async, launch_updater_script
-from src.widgets.status_bar import StatusBar
+from src.widgets.status_bar import StatusBar, DisconnectBanner
 from src.views.setup_view import SetupView
 from src.views.controller_view import ControllerView
 from src.views.memory_view import MemoryView
@@ -40,18 +41,19 @@ class App(ctk.CTk):
 
         self._build_header()
         self._build_tabs()
+        self._build_banner()
         self._build_status_bar()
 
     # ── Header ─────────────────────────────────────────────────────
 
     def _build_header(self) -> None:
-        header = ctk.CTkFrame(self, corner_radius=0, height=48, fg_color="#1e1b4b")
+        header = ctk.CTkFrame(self, corner_radius=0, height=48, fg_color=theme.SURFACE_HEADER)
         header.grid(row=0, column=0, sticky="ew")
         header.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
-            header, text="\U0001f3ae  Switch Remote Control",
-            font=("", 18, "bold"), text_color="white",
+            header, text="🎮  Switch Remote Control",
+            font=theme.FONT_TITLE, text_color=theme.TEXT_PRIMARY,
         ).grid(row=0, column=0, padx=16, pady=10, sticky="w")
 
         right_frame = ctk.CTkFrame(header, fg_color="transparent")
@@ -59,13 +61,13 @@ class App(ctk.CTk):
 
         self._version_label = ctk.CTkLabel(
             right_frame, text=f"v{APP_VERSION}",
-            font=("", 12), text_color="#94a3b8",
+            font=theme.FONT_BODY, text_color="#94a3b8",
         )
         self._version_label.pack(side="left", padx=(0, 8))
 
         self._update_btn = ctk.CTkButton(
             right_frame, text="检查更新...", width=90, height=28,
-            font=("", 12), fg_color="#334155", hover_color="#475569",
+            font=theme.FONT_BODY, fg_color=theme.SLATE, hover_color=theme.SLATE_HOVER,
             command=self._on_update_click,
         )
         self._update_btn.pack(side="left")
@@ -77,7 +79,7 @@ class App(ctk.CTk):
     # ── Tabs ───────────────────────────────────────────────────────
 
     def _build_tabs(self) -> None:
-        self._tabview = ctk.CTkTabview(self, corner_radius=8)
+        self._tabview = ctk.CTkTabview(self, corner_radius=theme.CORNER_MD)
         self._tabview.grid(row=1, column=0, padx=8, pady=(4, 0), sticky="nsew")
 
         tab_setup = self._tabview.add("设置与连接")
@@ -92,7 +94,9 @@ class App(ctk.CTk):
             tab.grid_columnconfigure(0, weight=1)
             tab.grid_rowconfigure(0, weight=1)
 
-        self._setup_view = SetupView(tab_setup, self._conn)
+        self._setup_view = SetupView(
+            tab_setup, self._conn, on_info_fetched=self._on_switch_info,
+        )
         self._setup_view.grid(row=0, column=0, sticky="nsew")
 
         self._ctrl_view = ControllerView(tab_ctrl, self._conn)
@@ -113,11 +117,18 @@ class App(ctk.CTk):
         self._page_config_view = PageConfigView(tab_page_config, self._conn)
         self._page_config_view.grid(row=0, column=0, sticky="nsew")
 
+    # ── Disconnect banner ──────────────────────────────────────────
+
+    def _build_banner(self) -> None:
+        self._banner = DisconnectBanner(self)
+        self._banner.grid(row=2, column=0, sticky="ew")
+        # shown by default since we start disconnected
+
     # ── Status bar ─────────────────────────────────────────────────
 
     def _build_status_bar(self) -> None:
         self._status_bar = StatusBar(self)
-        self._status_bar.grid(row=2, column=0, sticky="ew")
+        self._status_bar.grid(row=3, column=0, sticky="ew")
 
     # ── Connection callback ────────────────────────────────────────
 
@@ -125,9 +136,43 @@ class App(ctk.CTk):
         def _update() -> None:
             if connected:
                 self._status_bar.set_connected(self._conn.ip or "")
+                self._banner.set_connected()
+                threading.Thread(target=self._fetch_status_info, daemon=True).start()
             else:
                 self._status_bar.set_disconnected()
+                self._banner.set_disconnected()
         self.after(0, _update)
+
+    def _on_switch_info(self, info: dict[str, str]) -> None:
+        """Receive Switch info from the setup view and push a summary to the status bar."""
+        title = info.get("Title ID", "").split()[0] if info.get("Title ID") else ""
+        battery = info.get("电池状态", "")
+        version = info.get("sys-botbase 版本", "")
+        parts: list[str] = []
+        if version:
+            parts.append(f"sys-botbase {version}")
+        if title and title != "[未连接]":
+            parts.append(f"Title {title}")
+        if battery:
+            parts.append(f"🔋 {battery}")
+        self._status_bar.set_info("  ·  ".join(parts))
+
+    def _fetch_status_info(self) -> None:
+        """Lightweight info fetch (version + title) for the status bar."""
+        if not self._conn.connected:
+            return
+        version = self._conn.get_version()
+        title = self._conn.get_title_id()
+        battery = self._conn.get_charge()
+        parts: list[str] = []
+        if version and not version.startswith("["):
+            parts.append(f"sys-botbase {version}")
+        if title and not title.startswith("["):
+            parts.append(f"Title {title}")
+        if battery and not battery.startswith("["):
+            parts.append(f"🔋 {battery}")
+        summary = "  ·  ".join(parts)
+        self.after(0, lambda: self._status_bar.set_info(summary))
 
     # ── Auto-update ─────────────────────────────────────────────────
 
@@ -147,23 +192,23 @@ class App(ctk.CTk):
 
         if info.available:
             self._update_btn.configure(
-                text="\u2b06 有新版本",
-                fg_color="#16a34a",
+                text="⬆ 有新版本",
+                fg_color=theme.SUCCESS_HOVER,
                 hover_color="#15803d",
-                text_color="white",
+                text_color=theme.TEXT_PRIMARY,
             )
         elif "失败" in info.message:
             self._update_btn.configure(
-                text="\u26a0 检查失败",
+                text="⚠ 检查失败",
                 fg_color="#92400e",
                 hover_color="#78350f",
-                text_color="white",
+                text_color=theme.TEXT_PRIMARY,
             )
         else:
             self._update_btn.configure(
-                text="\u2713 已是最新",
-                fg_color="#334155",
-                hover_color="#475569",
+                text="✓ 已是最新",
+                fg_color=theme.SLATE,
+                hover_color=theme.SLATE_HOVER,
             )
 
     def _on_update_click(self) -> None:

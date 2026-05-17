@@ -1,8 +1,10 @@
 """Setup & Connection tab — scan LAN, manual connect, sys-botbase config."""
 
 import threading
+from typing import Callable, Optional
 import customtkinter as ctk
 
+from src import theme
 from src.protocol import SwitchConnection, SYSBOT_PORT, CONFIGURE_KEYS
 from src.scanner import get_local_ip, derive_subnet, scan_subnet
 
@@ -12,11 +14,14 @@ class SetupView(ctk.CTkFrame):
         self,
         master: ctk.CTkBaseClass,
         conn: SwitchConnection,
+        on_info_fetched: Optional[Callable[[dict[str, str]], None]] = None,
         **kwargs,
     ) -> None:
         super().__init__(master, fg_color="transparent", **kwargs)
         self._conn = conn
+        self._on_info_fetched = on_info_fetched
         self._cancel_scan = threading.Event()
+        self._found_ips: list[str] = []
 
         self.grid_columnconfigure(0, weight=1)
 
@@ -28,43 +33,46 @@ class SetupView(ctk.CTkFrame):
     # ── Manual connection ──────────────────────────────────────────
 
     def _build_connect_section(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=0, column=0, padx=16, pady=(16, 8), sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=0, column=0, padx=theme.SECTION_PADX, pady=(16, 8), sticky="ew")
         sec.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(sec, text="手动连接", font=("", 16, "bold")).grid(
+        ctk.CTkLabel(sec, text="手动连接", font=theme.FONT_SECTION).grid(
             row=0, column=0, columnspan=3, padx=16, pady=(12, 8), sticky="w",
         )
 
         ctk.CTkLabel(sec, text="Switch IP:").grid(row=1, column=0, padx=(16, 4), pady=8, sticky="w")
         self._ip_entry = ctk.CTkEntry(sec, placeholder_text="192.168.1.xxx", width=200)
         self._ip_entry.grid(row=1, column=1, padx=4, pady=8, sticky="ew")
+        self._ip_entry.bind("<Return>", lambda e: self._do_connect())
 
         btn_frame = ctk.CTkFrame(sec, fg_color="transparent")
         btn_frame.grid(row=1, column=2, padx=(4, 16), pady=8)
 
         self._connect_btn = ctk.CTkButton(
-            btn_frame, text="连接", width=80, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_connect,
+            btn_frame, text="连接", width=80, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_connect,
         )
         self._connect_btn.pack(side="left", padx=2)
 
         self._disconnect_btn = ctk.CTkButton(
-            btn_frame, text="断开", width=80, fg_color="#ef4444",
-            hover_color="#dc2626", command=self._do_disconnect,
+            btn_frame, text="断开", width=80, height=theme.BTN_H_MD,
+            fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+            command=self._do_disconnect,
         )
         self._disconnect_btn.pack(side="left", padx=2)
 
-        self._connect_msg = ctk.CTkLabel(sec, text="", text_color="#9ca3af", font=("", 12))
+        self._connect_msg = ctk.CTkLabel(sec, text="", text_color=theme.TEXT_MUTED, font=theme.FONT_BODY)
         self._connect_msg.grid(row=2, column=0, columnspan=3, padx=16, pady=(0, 12), sticky="w")
 
     def _do_connect(self) -> None:
         ip = self._ip_entry.get().strip()
         if not ip:
-            self._connect_msg.configure(text="请输入 Switch IP 地址", text_color="#ef4444")
+            self._connect_msg.configure(text="请输入 Switch IP 地址", text_color=theme.DANGER)
             return
-        self._connect_btn.configure(state="disabled")
-        self._connect_msg.configure(text="正在连接…", text_color="#eab308")
+        self._connect_btn.configure(state="disabled", text="连接中…")
+        self._connect_msg.configure(text="正在连接…", text_color=theme.WARNING)
 
         def _task() -> None:
             self._conn.auto_reconnect = False
@@ -72,9 +80,10 @@ class SetupView(ctk.CTkFrame):
             self._conn.auto_reconnect = True
             self.after(0, lambda: self._connect_msg.configure(
                 text=msg,
-                text_color="#22c55e" if self._conn.connected else "#ef4444",
+                text_color=theme.SUCCESS if self._conn.connected else theme.DANGER,
             ))
-            self.after(0, lambda: self._connect_btn.configure(state="normal"))
+            self.after(0, lambda: self._connect_btn.configure(state="normal", text="连接"))
+            self.after(0, self._refresh_found_list)
             if self._conn.connected:
                 self._fetch_info()
 
@@ -86,8 +95,9 @@ class SetupView(ctk.CTkFrame):
         def _task() -> None:
             self._conn.disconnect()
             self._conn.auto_reconnect = True
-            self.after(0, lambda: self._connect_msg.configure(text="已断开连接", text_color="#9ca3af"))
+            self.after(0, lambda: self._connect_msg.configure(text="已断开连接", text_color=theme.TEXT_MUTED))
             self.after(0, self._clear_info)
+            self.after(0, self._refresh_found_list)
 
         threading.Thread(target=_task, daemon=True).start()
 
@@ -99,13 +109,20 @@ class SetupView(ctk.CTkFrame):
     # ── Network scan ───────────────────────────────────────────────
 
     def _build_scan_section(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=1, column=0, padx=16, pady=8, sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=1, column=0, padx=theme.SECTION_PADX, pady=8, sticky="ew")
         sec.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(sec, text="局域网扫描", font=("", 16, "bold")).grid(
-            row=0, column=0, columnspan=3, padx=16, pady=(12, 8), sticky="w",
+        header_row = ctk.CTkFrame(sec, fg_color="transparent")
+        header_row.grid(row=0, column=0, columnspan=3, padx=16, pady=(12, 4), sticky="ew")
+        header_row.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(header_row, text="局域网扫描", font=theme.FONT_SECTION).grid(
+            row=0, column=0, sticky="w",
         )
+        self._count_badge = ctk.CTkLabel(
+            header_row, text="", font=theme.FONT_HINT, text_color=theme.TEXT_MUTED,
+        )
+        self._count_badge.grid(row=0, column=1, sticky="e")
 
         ctk.CTkLabel(sec, text="子网:").grid(row=1, column=0, padx=(16, 4), pady=8, sticky="w")
         local_ip = get_local_ip()
@@ -113,19 +130,22 @@ class SetupView(ctk.CTkFrame):
         self._subnet_entry = ctk.CTkEntry(sec, placeholder_text=subnet_hint, width=160)
         self._subnet_entry.insert(0, subnet_hint)
         self._subnet_entry.grid(row=1, column=1, padx=4, pady=8, sticky="w")
+        self._subnet_entry.bind("<Return>", lambda e: self._do_scan())
 
         btn_frame = ctk.CTkFrame(sec, fg_color="transparent")
         btn_frame.grid(row=1, column=2, padx=(4, 16), pady=8)
 
         self._scan_btn = ctk.CTkButton(
-            btn_frame, text="开始扫描", width=100, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_scan,
+            btn_frame, text="开始扫描", width=100, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_scan,
         )
         self._scan_btn.pack(side="left", padx=2)
 
         self._stop_scan_btn = ctk.CTkButton(
-            btn_frame, text="停止", width=60, fg_color="#ef4444",
-            hover_color="#dc2626", command=self._stop_scan, state="disabled",
+            btn_frame, text="停止", width=60, height=theme.BTN_H_MD,
+            fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+            command=self._stop_scan, state="disabled",
         )
         self._stop_scan_btn.pack(side="left", padx=2)
 
@@ -133,7 +153,7 @@ class SetupView(ctk.CTkFrame):
         self._scan_progress.set(0)
         self._scan_progress.grid(row=2, column=0, columnspan=3, padx=16, pady=4, sticky="ew")
 
-        self._scan_label = ctk.CTkLabel(sec, text="", font=("", 12), text_color="#9ca3af")
+        self._scan_label = ctk.CTkLabel(sec, text="", font=theme.FONT_BODY, text_color=theme.TEXT_MUTED)
         self._scan_label.grid(row=3, column=0, columnspan=2, padx=16, pady=(0, 4), sticky="w")
 
         self._found_frame = ctk.CTkScrollableFrame(sec, height=80)
@@ -144,10 +164,12 @@ class SetupView(ctk.CTkFrame):
         subnet = self._subnet_entry.get().strip()
         if not subnet:
             return
+        self._found_ips.clear()
         for w in self._found_frame.winfo_children():
             w.destroy()
         self._scan_progress.set(0)
         self._scan_label.configure(text="扫描中…")
+        self._count_badge.configure(text="")
         self._scan_btn.configure(state="disabled")
         self._stop_scan_btn.configure(state="normal")
 
@@ -172,21 +194,61 @@ class SetupView(ctk.CTkFrame):
                 text=f"扫描完成，发现 {count} 台设备" if not self._cancel_scan.is_set()
                 else f"扫描已取消，发现 {count} 台设备",
             ))
+            self.after(0, self._refresh_count_badge)
 
         threading.Thread(target=_task, daemon=True).start()
 
     def _stop_scan(self) -> None:
         self._cancel_scan.set()
 
+    def _refresh_count_badge(self) -> None:
+        if self._found_ips:
+            self._count_badge.configure(
+                text=f"已发现 {len(self._found_ips)} 台",
+                text_color=theme.SUCCESS,
+            )
+        else:
+            self._count_badge.configure(text="", text_color=theme.TEXT_MUTED)
+
     def _add_found_device(self, ip: str) -> None:
-        row = ctk.CTkFrame(self._found_frame, fg_color="transparent")
+        if ip not in self._found_ips:
+            self._found_ips.append(ip)
+        self._refresh_count_badge()
+        self._render_device_row(ip)
+
+    def _refresh_found_list(self) -> None:
+        for w in self._found_frame.winfo_children():
+            w.destroy()
+        for ip in self._found_ips:
+            self._render_device_row(ip)
+
+    def _render_device_row(self, ip: str) -> None:
+        is_current = self._conn.connected and self._conn.ip == ip
+        row = ctk.CTkFrame(
+            self._found_frame,
+            fg_color=theme.SLATE if is_current else "transparent",
+            corner_radius=theme.CORNER_SM,
+        )
         row.pack(fill="x", padx=4, pady=2)
-        ctk.CTkLabel(row, text=f"\U0001f3ae  {ip}:6000", font=("", 13)).pack(side="left", padx=8)
-        ctk.CTkButton(
-            row, text="连接", width=60, height=26,
-            fg_color="#22c55e", hover_color="#16a34a",
-            command=lambda: self._connect_to(ip),
-        ).pack(side="right", padx=8)
+
+        prefix = "✓ " if is_current else "🎮  "
+        label_color = theme.SUCCESS if is_current else theme.TEXT_ON_DARK
+        ctk.CTkLabel(
+            row, text=f"{prefix}{ip}:6000",
+            font=theme.FONT_BODY, text_color=label_color,
+        ).pack(side="left", padx=8)
+
+        if is_current:
+            ctk.CTkLabel(
+                row, text="当前已连接", font=theme.FONT_HINT,
+                text_color=theme.SUCCESS,
+            ).pack(side="right", padx=8)
+        else:
+            ctk.CTkButton(
+                row, text="连接", width=60, height=theme.BTN_H_SM,
+                fg_color=theme.SUCCESS, hover_color=theme.SUCCESS_HOVER,
+                command=lambda: self._connect_to(ip),
+            ).pack(side="right", padx=8)
 
     def _connect_to(self, ip: str) -> None:
         self._ip_entry.delete(0, "end")
@@ -196,26 +258,26 @@ class SetupView(ctk.CTkFrame):
     # ── Switch info ────────────────────────────────────────────────
 
     def _build_info_section(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=2, column=0, padx=16, pady=8, sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=2, column=0, padx=theme.SECTION_PADX, pady=8, sticky="ew")
         sec.grid_columnconfigure(0, weight=1)
 
         header = ctk.CTkFrame(sec, fg_color="transparent")
         header.grid(row=0, column=0, padx=16, pady=(12, 4), sticky="ew")
-        ctk.CTkLabel(header, text="Switch 信息", font=("", 16, "bold")).pack(side="left")
+        ctk.CTkLabel(header, text="Switch 信息", font=theme.FONT_SECTION).pack(side="left")
         ctk.CTkButton(
-            header, text="刷新", width=60, height=26,
-            fg_color="#6366f1", hover_color="#4f46e5",
+            header, text="刷新", width=60, height=theme.BTN_H_SM,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
             command=lambda: threading.Thread(target=self._fetch_info, daemon=True).start(),
         ).pack(side="right")
 
-        self._info_text = ctk.CTkTextbox(sec, height=120, state="disabled", font=("Consolas", 12))
+        self._info_text = ctk.CTkTextbox(sec, height=120, state="disabled", font=theme.FONT_MONO)
         self._info_text.grid(row=1, column=0, padx=16, pady=(4, 12), sticky="ew")
 
     def _fetch_info(self) -> None:
         if not self._conn.connected:
             return
-        lines = []
+        info: dict[str, str] = {}
         for label, fn in [
             ("sys-botbase 版本", self._conn.get_version),
             ("Title ID", self._conn.get_title_id),
@@ -226,11 +288,12 @@ class SetupView(ctk.CTkFrame):
             ("Main NSO Base", self._conn.get_main_nso_base),
             ("电池状态", self._conn.get_charge),
         ]:
-            resp = fn()
-            lines.append(f"{label}: {resp}")
+            info[label] = fn()
 
-        text = "\n".join(lines)
+        text = "\n".join(f"{k}: {v}" for k, v in info.items())
         self.after(0, lambda: self._show_info(text))
+        if self._on_info_fetched:
+            self.after(0, lambda i=info: self._on_info_fetched(i))
 
     def _show_info(self, text: str) -> None:
         self._info_text.configure(state="normal")
@@ -241,11 +304,11 @@ class SetupView(ctk.CTkFrame):
     # ── Configure ──────────────────────────────────────────────────
 
     def _build_configure_section(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=3, column=0, padx=16, pady=(8, 16), sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=3, column=0, padx=theme.SECTION_PADX, pady=(8, 16), sticky="ew")
         sec.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(sec, text="配置参数", font=("", 16, "bold")).grid(
+        ctk.CTkLabel(sec, text="配置参数", font=theme.FONT_SECTION).grid(
             row=0, column=0, columnspan=3, padx=16, pady=(12, 8), sticky="w",
         )
 
@@ -255,27 +318,29 @@ class SetupView(ctk.CTkFrame):
 
         self._cfg_val = ctk.CTkEntry(sec, placeholder_text="值", width=120)
         self._cfg_val.grid(row=1, column=1, padx=4, pady=8, sticky="w")
+        self._cfg_val.bind("<Return>", lambda e: self._do_configure())
 
         ctk.CTkButton(
-            sec, text="设置", width=60, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_configure,
+            sec, text="设置", width=60, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_configure,
         ).grid(row=1, column=2, padx=(4, 16), pady=8)
 
-        self._cfg_msg = ctk.CTkLabel(sec, text="", font=("", 12), text_color="#9ca3af")
+        self._cfg_msg = ctk.CTkLabel(sec, text="", font=theme.FONT_BODY, text_color=theme.TEXT_MUTED)
         self._cfg_msg.grid(row=2, column=0, columnspan=3, padx=16, pady=(0, 12), sticky="w")
 
     def _do_configure(self) -> None:
         key = self._cfg_key.get()
         val = self._cfg_val.get().strip()
         if not val:
-            self._cfg_msg.configure(text="请输入参数值", text_color="#ef4444")
+            self._cfg_msg.configure(text="请输入参数值", text_color=theme.DANGER)
             return
 
         def _task() -> None:
             resp = self._conn.configure(key, val)
             self.after(0, lambda: self._cfg_msg.configure(
                 text=f"configure {key} {val} → {resp}",
-                text_color="#22c55e" if self._conn.connected else "#ef4444",
+                text_color=theme.SUCCESS if self._conn.connected else theme.DANGER,
             ))
 
         threading.Thread(target=_task, daemon=True).start()

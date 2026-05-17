@@ -11,6 +11,7 @@ from typing import Optional
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
+from src import theme
 from src.protocol import SwitchConnection
 from src.recorder import (
     PokemonRecorder, RecorderCallbacks, RecorderProgress,
@@ -31,10 +32,10 @@ ALL_BUTTONS = [
 def _step_display(step: Step) -> str:
     """Human-readable one-line description of a step."""
     if step.is_verify:
-        return f"\u2714 验证页面: {step.verify_page}"
+        return f"✔ 验证页面: {step.verify_page}"
     label = f"按 {step.button}"
     if step.screenshot_name:
-        label += f"  \u2192  截图 [{step.screenshot_name}]"
+        label += f"  →  截图 [{step.screenshot_name}]"
     return label
 
 
@@ -69,73 +70,81 @@ class RecorderView(ctk.CTkFrame):
     # ── Config panel ───────────────────────────────────────────────
 
     def _build_config(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=0, column=0, padx=16, pady=(16, 8), sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=0, column=0, padx=theme.SECTION_PADX, pady=(16, 8), sticky="ew")
 
-        ctk.CTkLabel(sec, text="Pokemon 信息采集", font=("", 18, "bold")).pack(
+        ctk.CTkLabel(sec, text="Pokemon 信息采集", font=theme.FONT_TITLE).pack(
             padx=16, pady=(12, 4), anchor="w",
         )
         ctk.CTkLabel(
-            sec, font=("", 11), text_color="#9ca3af",
+            sec, font=theme.FONT_HINT, text_color=theme.TEXT_MUTED,
             text="右侧步骤列表可直接编辑：点击选中、拖拽排序、工具栏添加/删除指令",
         ).pack(padx=16, pady=(0, 8), anchor="w")
 
+        # Use grid for the params row so labels/entries align even when window resizes.
         row = ctk.CTkFrame(sec, fg_color="transparent")
         row.pack(fill="x", padx=16, pady=(0, 12))
+        for i in (1, 3, 5, 7):
+            row.grid_columnconfigure(i, weight=0)
+        row.grid_columnconfigure(8, weight=1)
 
-        ctk.CTkLabel(row, text="采集数量:").pack(side="left", padx=(0, 4))
-        self._count_entry = ctk.CTkEntry(row, width=50, placeholder_text="6")
+        ctk.CTkLabel(row, text="采集数量:").grid(row=0, column=0, padx=(0, 4), sticky="w")
+        self._count_entry = ctk.CTkEntry(row, width=60, placeholder_text="6")
         self._count_entry.insert(0, "6")
-        self._count_entry.pack(side="left", padx=4)
+        self._count_entry.grid(row=0, column=1, padx=(0, 16))
 
-        ctk.CTkLabel(row, text="每步等待(ms):").pack(side="left", padx=(16, 4))
-        self._wait_entry = ctk.CTkEntry(row, width=60, placeholder_text="500")
+        ctk.CTkLabel(row, text="每步等待(ms):").grid(row=0, column=2, padx=(0, 4), sticky="w")
+        self._wait_entry = ctk.CTkEntry(row, width=70, placeholder_text="500")
         self._wait_entry.insert(0, "500")
-        self._wait_entry.pack(side="left", padx=4)
+        self._wait_entry.grid(row=0, column=3, padx=(0, 16))
 
-        ctk.CTkLabel(row, text="差异阈值:").pack(side="left", padx=(16, 4))
-        self._threshold_entry = ctk.CTkEntry(row, width=60, placeholder_text="0.02")
+        ctk.CTkLabel(row, text="差异阈值:").grid(row=0, column=4, padx=(0, 4), sticky="w")
+        self._threshold_entry = ctk.CTkEntry(row, width=70, placeholder_text="0.02")
         self._threshold_entry.insert(0, "0.02")
-        self._threshold_entry.pack(side="left", padx=4)
+        self._threshold_entry.grid(row=0, column=5, padx=(0, 16))
 
-        ctk.CTkLabel(row, text="最大重试:").pack(side="left", padx=(16, 4))
-        self._retry_entry = ctk.CTkEntry(row, width=40, placeholder_text="3")
+        ctk.CTkLabel(row, text="最大重试:").grid(row=0, column=6, padx=(0, 4), sticky="w")
+        self._retry_entry = ctk.CTkEntry(row, width=50, placeholder_text="3")
         self._retry_entry.insert(0, "3")
-        self._retry_entry.pack(side="left", padx=4)
+        self._retry_entry.grid(row=0, column=7, padx=(0, 4))
 
     # ── Control buttons ────────────────────────────────────────────
 
     def _build_controls(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=1, column=0, padx=16, pady=4, sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=1, column=0, padx=theme.SECTION_PADX, pady=4, sticky="ew")
 
         row = ctk.CTkFrame(sec, fg_color="transparent")
         row.pack(fill="x", padx=16, pady=10)
 
         self._start_btn = ctk.CTkButton(
-            row, text="\u25b6  开始采集", width=120, fg_color="#22c55e",
-            hover_color="#16a34a", font=("", 13, "bold"),
+            row, text="▶  开始采集", width=120, height=theme.BTN_H_LG,
+            fg_color=theme.SUCCESS, hover_color=theme.SUCCESS_HOVER,
+            font=theme.FONT_SUBSECTION,
             command=self._do_start,
         )
         self._start_btn.pack(side="left", padx=4)
 
         self._pause_btn = ctk.CTkButton(
-            row, text="\u23f8  暂停", width=80, fg_color="#eab308",
-            hover_color="#ca8a04", font=("", 13, "bold"),
+            row, text="⏸  暂停", width=80, height=theme.BTN_H_LG,
+            fg_color=theme.WARNING, hover_color=theme.WARNING_HOVER,
+            font=theme.FONT_SUBSECTION,
             command=self._do_pause, state="disabled",
         )
         self._pause_btn.pack(side="left", padx=4)
 
         self._stop_btn = ctk.CTkButton(
-            row, text="\u25a0  停止", width=80, fg_color="#ef4444",
-            hover_color="#dc2626", font=("", 13, "bold"),
+            row, text="■  停止", width=80, height=theme.BTN_H_LG,
+            fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+            font=theme.FONT_SUBSECTION,
             command=self._do_stop, state="disabled",
         )
         self._stop_btn.pack(side="left", padx=4)
 
         self._open_dir_btn = ctk.CTkButton(
-            row, text="打开保存目录", width=110, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_open_dir, state="disabled",
+            row, text="打开保存目录", width=110, height=theme.BTN_H_LG,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_open_dir, state="disabled",
         )
         self._open_dir_btn.pack(side="right", padx=4)
 
@@ -148,15 +157,16 @@ class RecorderView(ctk.CTkFrame):
         self._progress_bar.pack(fill="x", side="left", expand=True, padx=(0, 8))
 
         self._progress_label = ctk.CTkLabel(
-            prog_row, text="就绪", font=("", 12), text_color="#9ca3af", width=220,
+            prog_row, text="就绪", font=theme.FONT_BODY,
+            text_color=theme.TEXT_MUTED, width=260,
         )
         self._progress_label.pack(side="right")
 
     # ── Main area: preview + step editor ─────────────────────────
 
     def _build_main_area(self) -> None:
-        main = ctk.CTkFrame(self, corner_radius=12)
-        main.grid(row=2, column=0, padx=16, pady=4, sticky="nsew")
+        main = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        main.grid(row=2, column=0, padx=theme.SECTION_PADX, pady=4, sticky="nsew")
         main.grid_columnconfigure(0, weight=3)
         main.grid_columnconfigure(1, weight=2)
         main.grid_rowconfigure(0, weight=1)
@@ -167,15 +177,15 @@ class RecorderView(ctk.CTkFrame):
         preview_frame.grid_rowconfigure(1, weight=1)
         preview_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(preview_frame, text="实时预览", font=("", 14, "bold")).grid(
+        ctk.CTkLabel(preview_frame, text="实时预览", font=theme.FONT_SUBSECTION).grid(
             row=0, column=0, padx=8, pady=(4, 0), sticky="w",
         )
         self._preview_canvas = tk.Canvas(
-            preview_frame, bg="#0f0f1a", highlightthickness=0,
+            preview_frame, bg=theme.SURFACE_DARK, highlightthickness=0,
         )
         self._preview_canvas.grid(row=1, column=0, padx=8, pady=8, sticky="nsew")
         self._preview_name = ctk.CTkLabel(
-            preview_frame, text="", font=("Consolas", 12), text_color="#9ca3af",
+            preview_frame, text="", font=theme.FONT_MONO, text_color=theme.TEXT_MUTED,
         )
         self._preview_name.grid(row=2, column=0, padx=8, pady=(0, 4))
 
@@ -186,7 +196,7 @@ class RecorderView(ctk.CTkFrame):
         editor_frame.grid_columnconfigure(0, weight=1)
 
         # Header
-        ctk.CTkLabel(editor_frame, text="采集步骤", font=("", 14, "bold")).grid(
+        ctk.CTkLabel(editor_frame, text="采集步骤", font=theme.FONT_SUBSECTION).grid(
             row=0, column=0, padx=8, pady=(4, 2), sticky="w",
         )
 
@@ -194,66 +204,66 @@ class RecorderView(ctk.CTkFrame):
         self._build_editor_toolbar(editor_frame)
 
         # Step list
-        self._steps_scroll = ctk.CTkScrollableFrame(editor_frame, fg_color="#1a1a2e")
+        self._steps_scroll = ctk.CTkScrollableFrame(editor_frame, fg_color=theme.SURFACE_MID)
         self._steps_scroll.grid(row=2, column=0, padx=4, pady=4, sticky="nsew")
 
         # Step count label
         self._step_count_label = ctk.CTkLabel(
-            editor_frame, text="", font=("", 10), text_color="#6b7280",
+            editor_frame, text="", font=theme.FONT_SMALL, text_color=theme.TEXT_SUBTLE,
         )
         self._step_count_label.grid(row=3, column=0, padx=8, pady=(2, 4), sticky="w")
 
         self._render_step_list()
 
     def _build_editor_toolbar(self, parent: ctk.CTkFrame) -> None:
-        bar = ctk.CTkFrame(parent, fg_color="#1e1b4b", corner_radius=8, height=36)
+        bar = ctk.CTkFrame(parent, fg_color=theme.SURFACE_HEADER, corner_radius=theme.CORNER_MD, height=36)
         bar.grid(row=1, column=0, padx=4, pady=(2, 4), sticky="ew")
 
         self._toolbar_buttons: list[ctk.CTkButton] = []
 
         btn_add_press = ctk.CTkButton(
-            bar, text="+ 按键", width=60, height=26,
-            font=("", 10, "bold"), fg_color="#3b82f6", hover_color="#2563eb",
+            bar, text="+ 按键", width=60, height=theme.BTN_H_SM,
+            font=theme.FONT_BODY_BOLD, fg_color=theme.TOKEN_FACE, hover_color=theme.TOKEN_FACE_HOVER,
             command=self._add_press_step,
         )
         btn_add_press.pack(side="left", padx=(6, 2), pady=5)
         self._toolbar_buttons.append(btn_add_press)
 
         btn_add_verify = ctk.CTkButton(
-            bar, text="+ 验证", width=60, height=26,
-            font=("", 10, "bold"), fg_color="#8b5cf6", hover_color="#7c3aed",
+            bar, text="+ 验证", width=60, height=theme.BTN_H_SM,
+            font=theme.FONT_BODY_BOLD, fg_color="#8b5cf6", hover_color="#7c3aed",
             command=self._add_verify_step,
         )
         btn_add_verify.pack(side="left", padx=2, pady=5)
         self._toolbar_buttons.append(btn_add_verify)
 
         btn_delete = ctk.CTkButton(
-            bar, text="\u2716", width=30, height=26,
-            font=("", 12), fg_color="#ef4444", hover_color="#dc2626",
+            bar, text="✖", width=30, height=theme.BTN_H_SM,
+            font=("", 12), fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
             command=self._delete_selected,
         )
         btn_delete.pack(side="left", padx=(8, 2), pady=5)
         self._toolbar_buttons.append(btn_delete)
 
         btn_up = ctk.CTkButton(
-            bar, text="\u25b2", width=28, height=26,
-            font=("", 11), fg_color="#6b7280", hover_color="#4b5563",
+            bar, text="▲", width=28, height=theme.BTN_H_SM,
+            font=("", 11), fg_color=theme.NEUTRAL_SOFT, hover_color=theme.NEUTRAL_SOFT_HOVER,
             command=self._move_up,
         )
         btn_up.pack(side="left", padx=1, pady=5)
         self._toolbar_buttons.append(btn_up)
 
         btn_down = ctk.CTkButton(
-            bar, text="\u25bc", width=28, height=26,
-            font=("", 11), fg_color="#6b7280", hover_color="#4b5563",
+            bar, text="▼", width=28, height=theme.BTN_H_SM,
+            font=("", 11), fg_color=theme.NEUTRAL_SOFT, hover_color=theme.NEUTRAL_SOFT_HOVER,
             command=self._move_down,
         )
         btn_down.pack(side="left", padx=1, pady=5)
         self._toolbar_buttons.append(btn_down)
 
         btn_reset = ctk.CTkButton(
-            bar, text="重置默认", width=70, height=26,
-            font=("", 10), fg_color="#92400e", hover_color="#78350f",
+            bar, text="重置默认", width=70, height=theme.BTN_H_SM,
+            font=theme.FONT_SMALL, fg_color="#92400e", hover_color="#78350f",
             command=self._reset_steps,
         )
         btn_reset.pack(side="right", padx=(2, 6), pady=5)
@@ -274,24 +284,24 @@ class RecorderView(ctk.CTkFrame):
             is_done = self._is_running and (i <= self._completed_step_idx)
 
             if is_current:
-                bg = "#0e7490"  # cyan — running
+                bg = theme.RUNNING_BG
             elif is_done:
-                bg = "#15803d"  # green — done
+                bg = theme.DONE_BG
             elif is_selected:
-                bg = "#4f46e5"  # indigo — selected
+                bg = theme.SELECT_BG
             elif is_drag_target:
-                bg = "#334155"
+                bg = theme.DRAG_BG
             else:
                 bg = "transparent"
 
             frame_kwargs = {
                 "height": 32,
-                "corner_radius": 6,
+                "corner_radius": theme.CORNER_SM,
                 "fg_color": bg,
             }
             if is_drag_target:
                 frame_kwargs["border_width"] = 1
-                frame_kwargs["border_color"] = "#6366f1"
+                frame_kwargs["border_color"] = theme.DRAG_BORDER
 
             row = ctk.CTkFrame(self._steps_scroll, **frame_kwargs)
             row.pack(fill="x", padx=2, pady=1)
@@ -299,16 +309,16 @@ class RecorderView(ctk.CTkFrame):
 
             # Status indicator (replaces drag handle when running)
             if is_current:
-                status_text, status_color = "\u25b6", "#fef08a"
+                status_text, status_color = "▶", "#fef08a"
             elif is_done:
-                status_text, status_color = "\u2713", "#bbf7d0"
+                status_text, status_color = "✓", "#bbf7d0"
             else:
-                status_text, status_color = "", "#6b7280"
+                status_text, status_color = "", theme.TEXT_SUBTLE
 
             idx_lbl = ctk.CTkLabel(
                 row, text=f"{i+1:2d}.", width=28,
-                font=("Consolas", 10),
-                text_color="#94a3b8" if (is_current or is_done) else "#6b7280",
+                font=theme.FONT_MONO_XS,
+                text_color="#94a3b8" if (is_current or is_done) else theme.TEXT_SUBTLE,
             )
             idx_lbl.pack(side="left", padx=(4, 0))
 
@@ -327,29 +337,29 @@ class RecorderView(ctk.CTkFrame):
                 type_text = step.button
             type_lbl = ctk.CTkLabel(
                 row, text=type_text, width=50,
-                font=("Consolas", 10, "bold"), text_color=type_color,
+                font=theme.FONT_MONO_BOLD, text_color=type_color,
             )
             type_lbl.pack(side="left", padx=(2, 4))
 
             # Description
             desc = step.verify_page if step.is_verify else step.screenshot_name
             if is_current or is_done:
-                text_color = "#ffffff"
+                text_color = theme.TEXT_PRIMARY
             elif is_selected:
                 text_color = "#e2e8f0"
             else:
-                text_color = "#cbd5e1"
+                text_color = theme.TEXT_ON_DARK
             desc_lbl = ctk.CTkLabel(
                 row, text=desc, anchor="w",
-                font=("Consolas", 11), text_color=text_color,
+                font=theme.FONT_MONO_SM, text_color=text_color,
             )
             desc_lbl.pack(side="left", fill="x", expand=True, padx=2)
 
             # Drag handle (hidden during running)
             if not self._is_running:
                 handle = ctk.CTkLabel(
-                    row, text="\u2630", width=20,
-                    font=("", 12), text_color="#4b5563", cursor="hand2",
+                    row, text="☰", width=20,
+                    font=("", 12), text_color=theme.NEUTRAL, cursor="hand2",
                 )
                 handle.pack(side="right", padx=(2, 6))
 
@@ -367,7 +377,7 @@ class RecorderView(ctk.CTkFrame):
             )
         else:
             self._step_count_label.configure(
-                text=f"共 {len(self._custom_steps)} 步  |  点击选中 · 拖拽 \u2630 排序"
+                text=f"共 {len(self._custom_steps)} 步  |  点击选中 · 拖拽 ☰ 排序"
             )
 
     def _on_click(self, idx: int) -> None:
@@ -469,20 +479,20 @@ class RecorderView(ctk.CTkFrame):
     # ── Log ────────────────────────────────────────────────────────
 
     def _build_log(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=3, column=0, padx=16, pady=(4, 16), sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=3, column=0, padx=theme.SECTION_PADX, pady=(4, 16), sticky="ew")
         sec.grid_columnconfigure(0, weight=1)
 
         header = ctk.CTkFrame(sec, fg_color="transparent")
         header.pack(fill="x", padx=16, pady=(10, 4))
-        ctk.CTkLabel(header, text="采集日志", font=("", 14, "bold")).pack(side="left")
+        ctk.CTkLabel(header, text="采集日志", font=theme.FONT_SUBSECTION).pack(side="left")
         ctk.CTkButton(
             header, text="清空", width=50, height=24,
-            fg_color="#6b7280", hover_color="#4b5563",
+            fg_color=theme.NEUTRAL_SOFT, hover_color=theme.NEUTRAL_SOFT_HOVER,
             command=self._clear_log,
         ).pack(side="right")
 
-        self._log_text = ctk.CTkTextbox(sec, height=120, font=("Consolas", 11), state="disabled")
+        self._log_text = ctk.CTkTextbox(sec, height=120, font=theme.FONT_MONO_SM, state="disabled")
         self._log_text.pack(fill="x", padx=16, pady=(0, 10))
 
     # ── Actions ────────────────────────────────────────────────────
@@ -542,13 +552,13 @@ class RecorderView(ctk.CTkFrame):
     def _do_pause(self) -> None:
         if not self._recorder:
             return
-        if self._recorder._paused:
+        if self._recorder.is_paused:
             self._recorder.resume()
-            self._pause_btn.configure(text="\u23f8  暂停", fg_color="#eab308")
+            self._pause_btn.configure(text="⏸  暂停", fg_color=theme.WARNING)
             self._log("已恢复")
         else:
             self._recorder.pause()
-            self._pause_btn.configure(text="\u25b6  继续", fg_color="#22c55e")
+            self._pause_btn.configure(text="▶  继续", fg_color=theme.SUCCESS)
             self._log("已暂停")
 
     def _do_stop(self) -> None:
@@ -575,8 +585,10 @@ class RecorderView(ctk.CTkFrame):
     def _update_progress(self, poke_idx: int, poke_total: int, step_idx: int, step_total: int) -> None:
         overall = ((poke_idx - 1) * step_total + step_idx) / (poke_total * step_total)
         self._progress_bar.set(overall)
+        pct = int(overall * 100)
         self._progress_label.configure(
-            text=f"Pokemon {poke_idx}/{poke_total}  |  步骤 {step_idx}/{step_total}",
+            text=f"{pct}%  ·  Pokemon {poke_idx}/{poke_total}  ·  步骤 {step_idx}/{step_total}",
+            text_color=theme.TEXT_PRIMARY,
         )
         self._running_pokemon_idx = poke_idx
         self._completed_step_idx = self._running_step_idx if self._running_step_idx is not None else -1
@@ -627,11 +639,11 @@ class RecorderView(ctk.CTkFrame):
         self._reset_buttons()
         self._open_dir_btn.configure(state="normal")
         self._progress_bar.set(1.0)
-        self._progress_label.configure(text="采集完成!")
+        self._progress_label.configure(text="100%  ·  采集完成!", text_color=theme.SUCCESS)
 
     def _reset_buttons(self) -> None:
         self._start_btn.configure(state="normal")
-        self._pause_btn.configure(state="disabled", text="\u23f8  暂停", fg_color="#eab308")
+        self._pause_btn.configure(state="disabled", text="⏸  暂停", fg_color=theme.WARNING)
         self._stop_btn.configure(state="disabled")
 
     # ── Log helpers ────────────────────────────────────────────────
@@ -664,7 +676,7 @@ class _PagePickerDialog(ctk.CTkToplevel):
         self.grab_set()
         self.focus_set()
 
-        ctk.CTkLabel(self, text="选择要验证的页面:", font=("", 13)).pack(
+        ctk.CTkLabel(self, text="选择要验证的页面:", font=theme.FONT_BODY).pack(
             padx=16, pady=(16, 8), anchor="w",
         )
 
@@ -674,7 +686,7 @@ class _PagePickerDialog(ctk.CTkToplevel):
         for name in profiles:
             ctk.CTkButton(
                 scroll, text=name, height=30, anchor="w",
-                fg_color="#334155", hover_color="#475569",
+                fg_color=theme.SLATE, hover_color=theme.SLATE_HOVER,
                 command=lambda n=name: self._pick(n),
             ).pack(fill="x", padx=4, pady=2)
 
@@ -697,7 +709,7 @@ class _PressStepDialog(ctk.CTkToplevel):
         self.focus_set()
 
         # Button selection
-        ctk.CTkLabel(self, text="按键:", font=("", 13)).pack(padx=16, pady=(16, 4), anchor="w")
+        ctk.CTkLabel(self, text="按键:", font=theme.FONT_BODY).pack(padx=16, pady=(16, 4), anchor="w")
         self._btn_var = ctk.StringVar(value="A")
         ctk.CTkOptionMenu(
             self, variable=self._btn_var,
@@ -712,13 +724,14 @@ class _PressStepDialog(ctk.CTkToplevel):
         ).pack(padx=16, pady=(4, 4), anchor="w")
 
         # Screenshot name
-        ctk.CTkLabel(self, text="截图名称:", font=("", 13)).pack(padx=16, pady=(8, 4), anchor="w")
+        ctk.CTkLabel(self, text="截图名称:", font=theme.FONT_BODY).pack(padx=16, pady=(8, 4), anchor="w")
         self._name_entry = ctk.CTkEntry(self, width=220, placeholder_text="例: moves_page_1")
         self._name_entry.pack(padx=16, pady=(0, 12), anchor="w")
+        self._name_entry.bind("<Return>", lambda e: self._confirm())
 
         ctk.CTkButton(
-            self, text="确定添加", width=120,
-            fg_color="#6366f1", hover_color="#4f46e5",
+            self, text="确定添加", width=120, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
             command=self._confirm,
         ).pack(pady=(8, 16))
 

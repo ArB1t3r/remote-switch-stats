@@ -205,6 +205,10 @@ class PokemonRecorder:
     def running(self) -> bool:
         return self._running
 
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
     def stop(self) -> None:
         self._running = False
 

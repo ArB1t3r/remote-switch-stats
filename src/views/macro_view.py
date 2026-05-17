@@ -6,6 +6,7 @@ import threading
 import time
 import customtkinter as ctk
 
+from src import theme
 from src.protocol import SwitchConnection, BUTTONS
 
 
@@ -16,6 +17,18 @@ PRESETS = {
     "Home 键": "HOME",
     "截图": "CAPTURE",
 }
+
+# Quick-builder token groups (button label, color, hover)
+QUICK_FACE = [("A", theme.TOKEN_FACE), ("B", theme.TOKEN_FACE),
+              ("X", theme.TOKEN_FACE), ("Y", theme.TOKEN_FACE)]
+QUICK_DPAD = [("DUP", theme.TOKEN_DPAD), ("DDOWN", theme.TOKEN_DPAD),
+              ("DLEFT", theme.TOKEN_DPAD), ("DRIGHT", theme.TOKEN_DPAD)]
+QUICK_SHOULDER = [("L", theme.TOKEN_SHOULDER), ("R", theme.TOKEN_SHOULDER),
+                  ("ZL", theme.TOKEN_SHOULDER), ("ZR", theme.TOKEN_SHOULDER)]
+QUICK_SYSTEM = [("PLUS", theme.TOKEN_SYSTEM), ("MINUS", theme.TOKEN_SYSTEM),
+                ("HOME", theme.ACCENT), ("CAPTURE", theme.INFO)]
+QUICK_WAIT = [("W200", theme.TOKEN_WAIT), ("W500", theme.TOKEN_WAIT),
+              ("W1000", theme.TOKEN_WAIT), ("W2000", theme.TOKEN_WAIT)]
 
 
 class MacroView(ctk.CTkFrame):
@@ -38,21 +51,21 @@ class MacroView(ctk.CTkFrame):
     # ── Sequence editor ────────────────────────────────────────────
 
     def _build_editor(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=0, column=0, padx=16, pady=(16, 8), sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=0, column=0, padx=theme.SECTION_PADX, pady=(16, 8), sticky="ew")
         sec.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(sec, text="宏序列编辑器", font=("", 16, "bold")).pack(
+        ctk.CTkLabel(sec, text="宏序列编辑器", font=theme.FONT_SECTION).pack(
             padx=16, pady=(12, 4), anchor="w",
         )
 
         ctk.CTkLabel(
-            sec, font=("", 11), text_color="#9ca3af",
+            sec, font=theme.FONT_HINT, text_color=theme.TEXT_MUTED,
             text="语法: 按键名=click, +按键=press, -按键=release, W毫秒=等待, "
                  "%X,Y=左摇杆, &X,Y=右摇杆。用逗号分隔。",
         ).pack(padx=16, pady=(0, 4), anchor="w")
 
-        self._seq_text = ctk.CTkTextbox(sec, height=100, font=("Consolas", 12))
+        self._seq_text = ctk.CTkTextbox(sec, height=100, font=theme.FONT_MONO)
         self._seq_text.pack(fill="x", padx=16, pady=4)
         self._seq_text.insert("1.0", "A,W500,B,W500,A")
 
@@ -60,14 +73,16 @@ class MacroView(ctk.CTkFrame):
         btn_row.pack(fill="x", padx=16, pady=(4, 12))
 
         self._run_btn = ctk.CTkButton(
-            btn_row, text="\u25b6  执行", width=100, fg_color="#22c55e",
-            hover_color="#16a34a", command=self._do_run,
+            btn_row, text="▶  执行", width=100, height=theme.BTN_H_MD,
+            fg_color=theme.SUCCESS, hover_color=theme.SUCCESS_HOVER,
+            command=self._do_run,
         )
         self._run_btn.pack(side="left", padx=4)
 
         self._cancel_btn = ctk.CTkButton(
-            btn_row, text="\u25a0  取消", width=100, fg_color="#ef4444",
-            hover_color="#dc2626", command=self._do_cancel, state="disabled",
+            btn_row, text="■  取消", width=100, height=theme.BTN_H_MD,
+            fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+            command=self._do_cancel, state="disabled",
         )
         self._cancel_btn.pack(side="left", padx=4)
 
@@ -81,22 +96,24 @@ class MacroView(ctk.CTkFrame):
         self._loop_count.pack(side="left", padx=4)
 
         ctk.CTkButton(
-            btn_row, text="保存", width=60, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_save,
+            btn_row, text="保存", width=60, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_save,
         ).pack(side="right", padx=4)
 
         ctk.CTkButton(
-            btn_row, text="加载", width=60, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_load,
+            btn_row, text="加载", width=60, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_load,
         ).pack(side="right", padx=4)
 
     # ── Presets ────────────────────────────────────────────────────
 
     def _build_presets(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=1, column=0, padx=16, pady=8, sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=1, column=0, padx=theme.SECTION_PADX, pady=8, sticky="ew")
 
-        ctk.CTkLabel(sec, text="预设宏", font=("", 14, "bold")).pack(
+        ctk.CTkLabel(sec, text="预设宏", font=theme.FONT_SUBSECTION).pack(
             padx=16, pady=(12, 4), anchor="w",
         )
         row = ctk.CTkFrame(sec, fg_color="transparent")
@@ -104,8 +121,8 @@ class MacroView(ctk.CTkFrame):
 
         for name, seq in PRESETS.items():
             ctk.CTkButton(
-                row, text=name, height=30,
-                fg_color="#4b5563", hover_color="#374151",
+                row, text=name, height=theme.BTN_H_MD,
+                fg_color=theme.NEUTRAL, hover_color=theme.NEUTRAL_HOVER,
                 command=lambda s=seq: self._insert_preset(s),
             ).pack(side="left", padx=4)
 
@@ -116,34 +133,38 @@ class MacroView(ctk.CTkFrame):
     # ── Quick builder ──────────────────────────────────────────────
 
     def _build_quick_builder(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=2, column=0, padx=16, pady=8, sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=2, column=0, padx=theme.SECTION_PADX, pady=8, sticky="ew")
 
-        ctk.CTkLabel(sec, text="快速构建", font=("", 14, "bold")).pack(
+        ctk.CTkLabel(sec, text="快速构建", font=theme.FONT_SUBSECTION).pack(
             padx=16, pady=(12, 4), anchor="w",
         )
 
-        row = ctk.CTkFrame(sec, fg_color="transparent")
-        row.pack(fill="x", padx=16, pady=(4, 4))
+        self._build_token_row(sec, "功能键", QUICK_FACE)
+        self._build_token_row(sec, "方向", QUICK_DPAD)
+        self._build_token_row(sec, "肩键", QUICK_SHOULDER)
+        self._build_token_row(sec, "系统", QUICK_SYSTEM)
+        self._build_token_row(sec, "等待", QUICK_WAIT, last=True)
 
-        for btn in ["A", "B", "X", "Y", "DUP", "DDOWN", "DLEFT", "DRIGHT", "L", "R", "ZL", "ZR", "PLUS", "MINUS", "HOME"]:
+    def _build_token_row(
+        self, parent: ctk.CTkFrame, label: str,
+        tokens: list[tuple[str, str]], last: bool = False,
+    ) -> None:
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=16, pady=(2, 12 if last else 2))
+
+        ctk.CTkLabel(
+            row, text=label, width=40, anchor="w",
+            font=theme.FONT_HINT, text_color=theme.TEXT_MUTED,
+        ).pack(side="left", padx=(0, 6))
+
+        for btn, color in tokens:
             ctk.CTkButton(
-                row, text=btn, width=50, height=28,
-                fg_color="#3730a3", hover_color="#312e81",
-                font=("", 10),
-                command=lambda b=btn: self._append_to_seq(b),
-            ).pack(side="left", padx=2, pady=2)
-
-        row2 = ctk.CTkFrame(sec, fg_color="transparent")
-        row2.pack(fill="x", padx=16, pady=(0, 12))
-
-        for label, val in [("W200", "W200"), ("W500", "W500"), ("W1000", "W1000"), ("W2000", "W2000")]:
-            ctk.CTkButton(
-                row2, text=label, width=60, height=28,
-                fg_color="#854d0e", hover_color="#713f12",
-                font=("", 10),
-                command=lambda v=val: self._append_to_seq(v),
-            ).pack(side="left", padx=2, pady=2)
+                row, text=btn, width=64, height=theme.BTN_H_SM,
+                fg_color=color, hover_color=theme.darken(color, 0.85),
+                font=theme.FONT_BODY_BOLD,
+                command=lambda v=btn: self._append_to_seq(v),
+            ).pack(side="left", padx=2)
 
     def _append_to_seq(self, token: str) -> None:
         current = self._seq_text.get("1.0", "end").strip()
@@ -226,20 +247,20 @@ class MacroView(ctk.CTkFrame):
     # ── Log ────────────────────────────────────────────────────────
 
     def _build_log(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=3, column=0, padx=16, pady=(8, 16), sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=3, column=0, padx=theme.SECTION_PADX, pady=(8, 16), sticky="ew")
         sec.grid_columnconfigure(0, weight=1)
 
         header = ctk.CTkFrame(sec, fg_color="transparent")
         header.pack(fill="x", padx=16, pady=(12, 4))
-        ctk.CTkLabel(header, text="执行日志", font=("", 14, "bold")).pack(side="left")
+        ctk.CTkLabel(header, text="执行日志", font=theme.FONT_SUBSECTION).pack(side="left")
         ctk.CTkButton(
             header, text="清空", width=50, height=24,
-            fg_color="#6b7280", hover_color="#4b5563",
+            fg_color=theme.NEUTRAL_SOFT, hover_color=theme.NEUTRAL_SOFT_HOVER,
             command=self._clear_log,
         ).pack(side="right")
 
-        self._log = ctk.CTkTextbox(sec, height=120, font=("Consolas", 11), state="disabled")
+        self._log = ctk.CTkTextbox(sec, height=120, font=theme.FONT_MONO_SM, state="disabled")
         self._log.pack(fill="x", padx=16, pady=(0, 12))
 
     def _log_msg(self, msg: str) -> None:

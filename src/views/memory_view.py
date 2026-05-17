@@ -4,6 +4,7 @@ import threading
 import textwrap
 import customtkinter as ctk
 
+from src import theme
 from src.protocol import SwitchConnection
 
 
@@ -27,11 +28,11 @@ class MemoryView(ctk.CTkFrame):
     # ── Peek (read) ────────────────────────────────────────────────
 
     def _build_peek_section(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=0, column=0, padx=16, pady=(16, 8), sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=0, column=0, padx=theme.SECTION_PADX, pady=(16, 8), sticky="ew")
         sec.grid_columnconfigure(2, weight=1)
 
-        ctk.CTkLabel(sec, text="内存读取 (Peek)", font=("", 16, "bold")).grid(
+        ctk.CTkLabel(sec, text="内存读取 (Peek)", font=theme.FONT_SECTION).grid(
             row=0, column=0, columnspan=5, padx=16, pady=(12, 8), sticky="w",
         )
 
@@ -44,14 +45,17 @@ class MemoryView(ctk.CTkFrame):
         ctk.CTkLabel(sec, text="地址:").grid(row=2, column=0, padx=(16, 4), pady=4, sticky="w")
         self._peek_addr = ctk.CTkEntry(sec, placeholder_text="0x12345678", width=200)
         self._peek_addr.grid(row=2, column=1, padx=4, pady=4, sticky="w")
+        self._peek_addr.bind("<Return>", lambda e: self._do_peek())
 
         ctk.CTkLabel(sec, text="字节数:").grid(row=2, column=2, padx=(12, 4), pady=4, sticky="w")
         self._peek_size = ctk.CTkEntry(sec, placeholder_text="4", width=80)
         self._peek_size.grid(row=2, column=3, padx=4, pady=4, sticky="w")
+        self._peek_size.bind("<Return>", lambda e: self._do_peek())
 
         ctk.CTkButton(
-            sec, text="读取", width=70, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_peek,
+            sec, text="读取", width=70, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_peek,
         ).grid(row=2, column=4, padx=(4, 16), pady=4)
 
     def _do_peek(self) -> None:
@@ -82,11 +86,11 @@ class MemoryView(ctk.CTkFrame):
     # ── Poke (write) ───────────────────────────────────────────────
 
     def _build_poke_section(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=1, column=0, padx=16, pady=8, sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=1, column=0, padx=theme.SECTION_PADX, pady=8, sticky="ew")
         sec.grid_columnconfigure(2, weight=1)
 
-        ctk.CTkLabel(sec, text="内存写入 (Poke)", font=("", 16, "bold")).grid(
+        ctk.CTkLabel(sec, text="内存写入 (Poke)", font=theme.FONT_SECTION).grid(
             row=0, column=0, columnspan=5, padx=16, pady=(12, 8), sticky="w",
         )
 
@@ -99,14 +103,17 @@ class MemoryView(ctk.CTkFrame):
         ctk.CTkLabel(sec, text="地址:").grid(row=2, column=0, padx=(16, 4), pady=4, sticky="w")
         self._poke_addr = ctk.CTkEntry(sec, placeholder_text="0x12345678", width=200)
         self._poke_addr.grid(row=2, column=1, padx=4, pady=4, sticky="w")
+        self._poke_addr.bind("<Return>", lambda e: self._do_poke())
 
         ctk.CTkLabel(sec, text="数据 (hex):").grid(row=2, column=2, padx=(12, 4), pady=4, sticky="w")
         self._poke_data = ctk.CTkEntry(sec, placeholder_text="0xDEADBEEF", width=200)
         self._poke_data.grid(row=2, column=3, padx=4, pady=4, sticky="w")
+        self._poke_data.bind("<Return>", lambda e: self._do_poke())
 
         ctk.CTkButton(
-            sec, text="写入", width=70, fg_color="#ef4444",
-            hover_color="#dc2626", command=self._do_poke,
+            sec, text="写入", width=70, height=theme.BTN_H_MD,
+            fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
+            command=self._do_poke,
         ).grid(row=2, column=4, padx=(4, 16), pady=4)
 
     def _do_poke(self) -> None:
@@ -131,11 +138,11 @@ class MemoryView(ctk.CTkFrame):
     # ── Pointer operations ─────────────────────────────────────────
 
     def _build_pointer_section(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=2, column=0, padx=16, pady=8, sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=2, column=0, padx=theme.SECTION_PADX, pady=8, sticky="ew")
         sec.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(sec, text="指针链 (Pointer)", font=("", 16, "bold")).grid(
+        ctk.CTkLabel(sec, text="指针链 (Pointer)", font=theme.FONT_SECTION).grid(
             row=0, column=0, columnspan=4, padx=16, pady=(12, 8), sticky="w",
         )
 
@@ -146,10 +153,13 @@ class MemoryView(ctk.CTkFrame):
         ctk.CTkLabel(sec, text="跳转链 (空格分隔):").grid(row=2, column=0, padx=(16, 4), pady=4, sticky="w")
         self._ptr_jumps = ctk.CTkEntry(sec, placeholder_text="0x45097552 0x10 0x20 0x30", width=400)
         self._ptr_jumps.grid(row=2, column=1, columnspan=2, padx=4, pady=4, sticky="ew")
+        self._ptr_jumps.bind("<Return>", lambda e: self._do_pointer_peek())
+        self._ptr_size.bind("<Return>", lambda e: self._do_pointer_peek())
 
         ctk.CTkButton(
-            sec, text="读取", width=70, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_pointer_peek,
+            sec, text="读取", width=70, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_pointer_peek,
         ).grid(row=2, column=3, padx=(4, 16), pady=4)
 
     def _do_pointer_peek(self) -> None:
@@ -177,10 +187,10 @@ class MemoryView(ctk.CTkFrame):
     # ── Freeze controls ────────────────────────────────────────────
 
     def _build_freeze_section(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=3, column=0, padx=16, pady=8, sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=3, column=0, padx=theme.SECTION_PADX, pady=8, sticky="ew")
 
-        ctk.CTkLabel(sec, text="内存冻结 (Freeze)", font=("", 16, "bold")).pack(
+        ctk.CTkLabel(sec, text="内存冻结 (Freeze)", font=theme.FONT_SECTION).pack(
             padx=16, pady=(12, 8), anchor="w",
         )
 
@@ -194,29 +204,33 @@ class MemoryView(ctk.CTkFrame):
         ctk.CTkLabel(row1, text="值 (hex):").pack(side="left", padx=(12, 4))
         self._frz_val = ctk.CTkEntry(row1, placeholder_text="0xFF", width=120)
         self._frz_val.pack(side="left", padx=4)
+        self._frz_addr.bind("<Return>", lambda e: self._do_freeze())
+        self._frz_val.bind("<Return>", lambda e: self._do_freeze())
 
         ctk.CTkButton(
-            row1, text="冻结", width=60, fg_color="#3b82f6",
-            hover_color="#2563eb", command=self._do_freeze,
+            row1, text="冻结", width=60, height=theme.BTN_H_MD,
+            fg_color=theme.TOKEN_FACE, hover_color=theme.TOKEN_FACE_HOVER,
+            command=self._do_freeze,
         ).pack(side="left", padx=4)
 
         ctk.CTkButton(
-            row1, text="解冻", width=60, fg_color="#f97316",
-            hover_color="#ea580c", command=self._do_unfreeze,
+            row1, text="解冻", width=60, height=theme.BTN_H_MD,
+            fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+            command=self._do_unfreeze,
         ).pack(side="left", padx=4)
 
         row2 = ctk.CTkFrame(sec, fg_color="transparent")
         row2.pack(fill="x", padx=16, pady=(4, 12))
 
-        for text, cmd in [
+        for text_label, cmd in [
             ("已冻结数量", self._do_freeze_count),
             ("全部解冻", self._do_freeze_clear),
             ("暂停冻结", self._do_freeze_pause),
             ("恢复冻结", self._do_freeze_unpause),
         ]:
             ctk.CTkButton(
-                row2, text=text, width=90, height=30,
-                fg_color="#4b5563", hover_color="#374151", command=cmd,
+                row2, text=text_label, width=90, height=theme.BTN_H_MD,
+                fg_color=theme.NEUTRAL, hover_color=theme.NEUTRAL_HOVER, command=cmd,
             ).pack(side="left", padx=4)
 
     def _do_freeze(self) -> None:
@@ -247,20 +261,20 @@ class MemoryView(ctk.CTkFrame):
     # ── Output ─────────────────────────────────────────────────────
 
     def _build_output(self) -> None:
-        sec = ctk.CTkFrame(self, corner_radius=12)
-        sec.grid(row=4, column=0, padx=16, pady=(8, 16), sticky="ew")
+        sec = ctk.CTkFrame(self, corner_radius=theme.CORNER_LG)
+        sec.grid(row=4, column=0, padx=theme.SECTION_PADX, pady=(8, 16), sticky="ew")
         sec.grid_columnconfigure(0, weight=1)
 
         header = ctk.CTkFrame(sec, fg_color="transparent")
         header.pack(fill="x", padx=16, pady=(12, 4))
-        ctk.CTkLabel(header, text="输出", font=("", 14, "bold")).pack(side="left")
+        ctk.CTkLabel(header, text="输出", font=theme.FONT_SUBSECTION).pack(side="left")
         ctk.CTkButton(
             header, text="清空", width=50, height=24,
-            fg_color="#6b7280", hover_color="#4b5563",
+            fg_color=theme.NEUTRAL_SOFT, hover_color=theme.NEUTRAL_SOFT_HOVER,
             command=self._clear_output,
         ).pack(side="right")
 
-        self._output = ctk.CTkTextbox(sec, height=160, font=("Consolas", 11), state="disabled")
+        self._output = ctk.CTkTextbox(sec, height=160, font=theme.FONT_MONO_SM, state="disabled")
         self._output.pack(fill="both", expand=True, padx=16, pady=(0, 12))
 
     def _append_output(self, text: str) -> None:

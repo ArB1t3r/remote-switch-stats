@@ -6,8 +6,9 @@ from datetime import datetime
 from typing import Optional
 
 import customtkinter as ctk
-from PIL import Image, ImageTk, ImageDraw
+from PIL import Image, ImageTk
 
+from src import theme
 from src.protocol import SwitchConnection
 from src.page_profile import (
     PageProfile, RegionBox, load_profiles, save_profiles, get_refs_dir,
@@ -38,6 +39,8 @@ class PageConfigView(ctk.CTkFrame):
         self._drawing = False
         self._draw_start: tuple[int, int] = (0, 0)
         self._temp_rect: Optional[int] = None
+        self._size_bubble_bg: Optional[int] = None
+        self._size_bubble_text: Optional[int] = None
         self._regions: list[RegionBox] = []
         self._rect_ids: list[int] = []
         self._selected_profile_idx: Optional[int] = None
@@ -51,11 +54,11 @@ class PageConfigView(ctk.CTkFrame):
     # ── Sidebar: saved profiles list ─────────────────────────────────
 
     def _build_sidebar(self) -> None:
-        sidebar = ctk.CTkFrame(self, width=200, corner_radius=12)
+        sidebar = ctk.CTkFrame(self, width=200, corner_radius=theme.CORNER_LG)
         sidebar.grid(row=0, column=0, padx=(16, 8), pady=16, sticky="ns")
         sidebar.grid_rowconfigure(1, weight=1)
 
-        ctk.CTkLabel(sidebar, text="已保存页面", font=("", 14, "bold")).grid(
+        ctk.CTkLabel(sidebar, text="已保存页面", font=theme.FONT_SUBSECTION).grid(
             row=0, column=0, padx=12, pady=(12, 4), sticky="w",
         )
 
@@ -66,8 +69,8 @@ class PageConfigView(ctk.CTkFrame):
         btn_frame.grid(row=2, column=0, padx=8, pady=(4, 12))
 
         ctk.CTkButton(
-            btn_frame, text="删除选中", width=80, height=28,
-            fg_color="#ef4444", hover_color="#dc2626",
+            btn_frame, text="删除选中", width=80, height=theme.BTN_H_SM,
+            fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
             command=self._delete_selected,
         ).pack(side="left", padx=2)
 
@@ -77,13 +80,23 @@ class PageConfigView(ctk.CTkFrame):
         for w in self._profile_list.winfo_children():
             w.destroy()
 
+        if not self._profiles:
+            empty = ctk.CTkLabel(
+                self._profile_list,
+                text="尚未保存任何页面\n\n截取画面后框选\n比对区域并保存",
+                font=theme.FONT_HINT, text_color=theme.TEXT_SUBTLE,
+                justify="center",
+            )
+            empty.pack(padx=8, pady=24)
+            return
+
         for idx, profile in enumerate(self._profiles):
             btn = ctk.CTkButton(
                 self._profile_list,
                 text=f"{profile.name} ({len(profile.regions)} 区域)",
                 height=30, anchor="w",
-                fg_color="#334155" if idx != self._selected_profile_idx else "#4f46e5",
-                hover_color="#475569",
+                fg_color=theme.SLATE if idx != self._selected_profile_idx else theme.SELECT_BG,
+                hover_color=theme.SLATE_HOVER,
                 command=lambda i=idx: self._select_profile(i),
             )
             btn.pack(fill="x", padx=4, pady=2)
@@ -130,43 +143,47 @@ class PageConfigView(ctk.CTkFrame):
         self._build_controls(main)
 
     def _build_toolbar(self, parent: ctk.CTkFrame) -> None:
-        bar = ctk.CTkFrame(parent, corner_radius=10)
+        bar = ctk.CTkFrame(parent, corner_radius=theme.CORNER_MD)
         bar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
         ctk.CTkButton(
-            bar, text="截取画面", width=100, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_capture,
+            bar, text="截取画面", width=100, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_capture,
         ).pack(side="left", padx=8, pady=8)
 
         ctk.CTkButton(
-            bar, text="测试匹配", width=100, fg_color="#22c55e",
-            hover_color="#16a34a", command=self._do_test,
+            bar, text="测试匹配", width=100, height=theme.BTN_H_MD,
+            fg_color=theme.SUCCESS, hover_color=theme.SUCCESS_HOVER,
+            command=self._do_test,
         ).pack(side="left", padx=4, pady=8)
 
         ctk.CTkButton(
-            bar, text="清除区域", width=80, fg_color="#6b7280",
-            hover_color="#4b5563", command=self._clear_regions,
+            bar, text="清除区域", width=80, height=theme.BTN_H_MD,
+            fg_color=theme.NEUTRAL_SOFT, hover_color=theme.NEUTRAL_SOFT_HOVER,
+            command=self._clear_regions,
         ).pack(side="left", padx=4, pady=8)
 
         self._status_label = ctk.CTkLabel(
-            bar, text="截取画面后在画布上框选比对区域", font=("", 11),
-            text_color="#9ca3af",
+            bar, text="截取画面后在画布上框选比对区域", font=theme.FONT_HINT,
+            text_color=theme.TEXT_MUTED,
         )
         self._status_label.pack(side="left", padx=12, pady=8)
 
     def _build_canvas(self, parent: ctk.CTkFrame) -> None:
-        canvas_frame = ctk.CTkFrame(parent, corner_radius=10)
+        canvas_frame = ctk.CTkFrame(parent, corner_radius=theme.CORNER_MD)
         canvas_frame.grid(row=1, column=0, sticky="nsew", pady=4)
 
         self._canvas = tk.Canvas(
             canvas_frame, width=CANVAS_W, height=CANVAS_H,
-            bg="#0f0f1a", highlightthickness=0,
+            bg=theme.SURFACE_DARK, highlightthickness=0,
+            cursor="crosshair",
         )
         self._canvas.pack(padx=8, pady=8)
         self._canvas.create_text(
             CANVAS_W // 2, CANVAS_H // 2,
             text="点击「截取画面」获取 Switch 屏幕\n然后拖拽鼠标框选比对区域",
-            fill="#6b7280", font=("", 13), justify="center",
+            fill=theme.TEXT_SUBTLE, font=("", 13), justify="center",
         )
 
         self._canvas.bind("<Button-1>", self._on_mouse_down)
@@ -175,7 +192,7 @@ class PageConfigView(ctk.CTkFrame):
         self._canvas.bind("<Button-3>", self._on_right_click)
 
     def _build_controls(self, parent: ctk.CTkFrame) -> None:
-        ctrl = ctk.CTkFrame(parent, corner_radius=10)
+        ctrl = ctk.CTkFrame(parent, corner_radius=theme.CORNER_MD)
         ctrl.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
         row1 = ctk.CTkFrame(ctrl, fg_color="transparent")
@@ -184,6 +201,7 @@ class PageConfigView(ctk.CTkFrame):
         ctk.CTkLabel(row1, text="页面名称:").pack(side="left", padx=(0, 4))
         self._name_entry = ctk.CTkEntry(row1, width=180, placeholder_text="例: 宝可梦列表")
         self._name_entry.pack(side="left", padx=4)
+        self._name_entry.bind("<Return>", lambda e: self._do_save())
 
         ctk.CTkLabel(row1, text="容错率:").pack(side="left", padx=(16, 4))
         self._threshold_slider = ctk.CTkSlider(
@@ -193,18 +211,19 @@ class PageConfigView(ctk.CTkFrame):
         self._threshold_slider.set(0.12)
         self._threshold_slider.pack(side="left", padx=4)
 
-        self._threshold_label = ctk.CTkLabel(row1, text="0.12", width=40, font=("Consolas", 12))
+        self._threshold_label = ctk.CTkLabel(row1, text="0.12", width=40, font=theme.FONT_MONO)
         self._threshold_label.pack(side="left", padx=4)
 
         ctk.CTkButton(
-            row1, text="保存配置", width=100, fg_color="#6366f1",
-            hover_color="#4f46e5", command=self._do_save,
+            row1, text="保存配置", width=100, height=theme.BTN_H_MD,
+            fg_color=theme.PRIMARY, hover_color=theme.PRIMARY_HOVER,
+            command=self._do_save,
         ).pack(side="right", padx=4)
 
         # Region info
         self._region_info = ctk.CTkLabel(
             ctrl, text="区域: 0 个 | 右键删除最近区域",
-            font=("", 11), text_color="#9ca3af",
+            font=theme.FONT_HINT, text_color=theme.TEXT_MUTED,
         )
         self._region_info.pack(padx=12, pady=(4, 10), anchor="w")
 
@@ -217,7 +236,7 @@ class PageConfigView(ctk.CTkFrame):
         self._draw_start = (event.x, event.y)
         self._temp_rect = self._canvas.create_rectangle(
             event.x, event.y, event.x, event.y,
-            outline="#f97316", width=2, dash=(4, 4),
+            outline=theme.ACCENT, width=2, dash=(4, 4),
         )
 
     def _on_mouse_drag(self, event: tk.Event) -> None:
@@ -228,6 +247,30 @@ class PageConfigView(ctk.CTkFrame):
             self._draw_start[0], self._draw_start[1], event.x, event.y,
         )
 
+        # Show size bubble in Switch-coords (1280x720)
+        w_canvas = abs(event.x - self._draw_start[0])
+        h_canvas = abs(event.y - self._draw_start[1])
+        w_switch = int(w_canvas / SCALE)
+        h_switch = int(h_canvas / SCALE)
+        bubble_text = f"{w_switch}×{h_switch}"
+        bx = event.x + 12
+        by = event.y + 12
+
+        if self._size_bubble_bg is None:
+            self._size_bubble_bg = self._canvas.create_rectangle(
+                bx - 2, by - 8, bx + 60, by + 8,
+                fill="#0f172a", outline=theme.ACCENT, width=1,
+            )
+            self._size_bubble_text = self._canvas.create_text(
+                bx + 28, by,
+                text=bubble_text, fill=theme.ACCENT,
+                font=(theme.MONO_FAMILY, 10, "bold"),
+            )
+        else:
+            self._canvas.coords(self._size_bubble_bg, bx - 2, by - 8, bx + 60, by + 8)
+            self._canvas.coords(self._size_bubble_text, bx + 28, by)
+            self._canvas.itemconfigure(self._size_bubble_text, text=bubble_text)
+
     def _on_mouse_up(self, event: tk.Event) -> None:
         if not self._drawing:
             return
@@ -235,6 +278,11 @@ class PageConfigView(ctk.CTkFrame):
         if self._temp_rect:
             self._canvas.delete(self._temp_rect)
             self._temp_rect = None
+        if self._size_bubble_bg is not None:
+            self._canvas.delete(self._size_bubble_bg)
+            self._canvas.delete(self._size_bubble_text)
+            self._size_bubble_bg = None
+            self._size_bubble_text = None
 
         x1_c, y1_c = self._draw_start
         x2_c, y2_c = event.x, event.y
@@ -280,13 +328,13 @@ class PageConfigView(ctk.CTkFrame):
 
             rid = self._canvas.create_rectangle(
                 x1, y1, x2, y2,
-                outline="#f97316", width=2,
+                outline=theme.ACCENT, width=2,
             )
             self._rect_ids.append(rid)
 
             label_id = self._canvas.create_text(
                 x1 + 4, y1 + 2, anchor="nw",
-                text=f"R{i+1}", fill="#f97316", font=("", 9, "bold"),
+                text=f"R{i+1}", fill=theme.ACCENT, font=("", 9, "bold"),
             )
             self._rect_ids.append(label_id)
 
@@ -311,10 +359,11 @@ class PageConfigView(ctk.CTkFrame):
                 self.after(0, self._display_image)
                 self.after(0, lambda: self._status_label.configure(
                     text=f"截取成功 ({img.width}x{img.height}) — 拖拽框选区域",
+                    text_color=theme.SUCCESS,
                 ))
             else:
                 self.after(0, lambda: self._status_label.configure(
-                    text="截取失败 — 请确保已连接", text_color="#ef4444",
+                    text="截取失败 — 请确保已连接", text_color=theme.DANGER,
                 ))
 
         threading.Thread(target=_task, daemon=True).start()
@@ -333,7 +382,7 @@ class PageConfigView(ctk.CTkFrame):
             self._status_label.configure(text="需要先截图并框选至少一个区域")
             return
 
-        self._status_label.configure(text="正在测试...")
+        self._status_label.configure(text="正在测试...", text_color=theme.TEXT_MUTED)
 
         def _task() -> None:
             raw = self._conn.pixel_peek()
@@ -353,7 +402,7 @@ class PageConfigView(ctk.CTkFrame):
             scores_str = " | ".join(f"R{i+1}={s:.4f}" for i, s in enumerate(scores))
 
             result = f"{'PASS' if passed else 'FAIL'} | {scores_str} (阈值={threshold:.2f})"
-            color = "#22c55e" if passed else "#ef4444"
+            color = theme.SUCCESS if passed else theme.DANGER
             self.after(0, lambda: self._status_label.configure(text=result, text_color=color))
 
         threading.Thread(target=_task, daemon=True).start()
@@ -361,13 +410,13 @@ class PageConfigView(ctk.CTkFrame):
     def _do_save(self) -> None:
         name = self._name_entry.get().strip()
         if not name:
-            self._status_label.configure(text="请输入页面名称", text_color="#ef4444")
+            self._status_label.configure(text="请输入页面名称", text_color=theme.DANGER)
             return
         if self._current_img is None:
-            self._status_label.configure(text="请先截取参考画面", text_color="#ef4444")
+            self._status_label.configure(text="请先截取参考画面", text_color=theme.DANGER)
             return
         if not self._regions:
-            self._status_label.configure(text="请框选至少一个比对区域", text_color="#ef4444")
+            self._status_label.configure(text="请框选至少一个比对区域", text_color=theme.DANGER)
             return
 
         # Save reference image
@@ -402,7 +451,7 @@ class PageConfigView(ctk.CTkFrame):
         self._refresh_profile_list()
         self._status_label.configure(
             text=f"已保存: {name} ({len(self._regions)} 区域, 阈值={threshold:.2f})",
-            text_color="#22c55e",
+            text_color=theme.SUCCESS,
         )
 
     def _on_threshold_change(self, value: float) -> None:
