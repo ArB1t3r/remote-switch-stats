@@ -116,15 +116,29 @@ def check_for_update_async(callback: Callable[[UpdateInfo], None]) -> None:
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def _find_update_script() -> Path | None:
+    """Locate update_windows.ps1 by checking multiple candidate directories."""
+    candidates = [
+        Path(sys.executable).parent / "update_windows.ps1",
+        Path(sys.executable).parent.parent / "update_windows.ps1",
+        Path(__file__).resolve().parent.parent / "update_windows.ps1",
+    ]
+    if hasattr(sys, "_MEIPASS"):
+        candidates.insert(0, Path(sys._MEIPASS).parent / "update_windows.ps1")
+
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
 def launch_updater_script() -> bool:
     """Launch the update_windows.ps1 script as a separate process. Returns True if launched."""
-    project_root = Path(__file__).resolve().parent.parent
-    script = project_root / "update_windows.ps1"
-
-    if not script.exists():
+    if platform.system() != "Windows":
         return False
 
-    if platform.system() != "Windows":
+    script = _find_update_script()
+    if not script:
         return False
 
     subprocess.Popen(
@@ -133,7 +147,7 @@ def launch_updater_script() -> bool:
             "-ExecutionPolicy", "Bypass",
             "-File", str(script),
         ],
-        cwd=str(project_root),
+        cwd=str(script.parent),
         creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
     )
     return True
