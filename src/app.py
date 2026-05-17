@@ -147,6 +147,13 @@ class App(ctk.CTk):
                 hover_color="#15803d",
                 text_color="white",
             )
+        elif "失败" in info.message:
+            self._update_btn.configure(
+                text="\u26a0 检查失败",
+                fg_color="#92400e",
+                hover_color="#78350f",
+                text_color="white",
+            )
         else:
             self._update_btn.configure(
                 text="\u2713 已是最新",

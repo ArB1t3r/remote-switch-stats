@@ -15,9 +15,10 @@ from typing import Callable
 
 from src import GITHUB_OWNER, GITHUB_REPO, APP_VERSION
 
-GITHUB_API_URL = (
-    f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/commits/main"
-)
+GITHUB_API_URLS = [
+    f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/commits/main",
+    f"https://ghfast.top/https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/commits/main",
+]
 
 BUILD_SHA_FILE = ".build_sha"
 
@@ -45,16 +46,23 @@ def _get_local_sha() -> str:
 
 
 def _fetch_latest_commit() -> dict:
-    """Fetch the latest commit info from GitHub API (no auth required for public repos)."""
-    req = urllib.request.Request(
-        GITHUB_API_URL,
-        headers={
-            "Accept": "application/vnd.github.v3+json",
-            "User-Agent": f"SwitchRemote/{APP_VERSION}",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    """Fetch the latest commit info from GitHub API. Tries mirror if direct access fails."""
+    last_error: Exception | None = None
+    for url in GITHUB_API_URLS:
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": f"SwitchRemote/{APP_VERSION}",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            last_error = exc
+            continue
+    raise last_error or RuntimeError("所有 API 地址均不可用")
 
 
 def check_for_update() -> UpdateInfo:
