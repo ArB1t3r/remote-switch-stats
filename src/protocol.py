@@ -44,8 +44,8 @@ CONFIGURE_KEYS = [
 class SwitchConnection:
     """Persistent TCP connection to a sys-botbase instance."""
 
-    MAX_RECONNECT_ATTEMPTS = 3
-    RECONNECT_DELAY = 1.5  # seconds between retries
+    MAX_RECONNECT_ATTEMPTS = 2
+    RECONNECT_DELAY = 0.8  # seconds between retries
 
     def __init__(self) -> None:
         self._sock: Optional[socket.socket] = None
@@ -162,10 +162,12 @@ class SwitchConnection:
                 return self._recv_line()
             except (socket.timeout, OSError) as e:
                 self._notify(False)
-                # Release the lock before reconnecting
                 pass
 
-        # Auto-reconnect outside the lock
+        if not wait_response:
+            return "[发送失败]"
+
+        # Auto-reconnect only for commands that expect a response
         if self._auto_reconnect and self._ip:
             if self._try_reconnect():
                 return self.send_command(cmd, wait_response)
@@ -216,39 +218,39 @@ class SwitchConnection:
             self._sock.settimeout(SOCKET_TIMEOUT)
         return b"".join(chunks)
 
-    # ── Controller commands ─────────────────────────────────────────
+    # ── Controller commands (fire-and-forget, no response wait) ────
 
     def click(self, button: str) -> str:
-        return self.send_command(f"click {button}")
+        return self.send_command(f"click {button}", wait_response=False)
 
     def press(self, button: str) -> str:
-        return self.send_command(f"press {button}")
+        return self.send_command(f"press {button}", wait_response=False)
 
     def release(self, button: str) -> str:
-        return self.send_command(f"release {button}")
+        return self.send_command(f"release {button}", wait_response=False)
 
     def set_stick(self, stick: str, x: int, y: int) -> str:
         x = max(STICK_MIN, min(STICK_MAX, x))
         y = max(STICK_MIN, min(STICK_MAX, y))
-        return self.send_command(f"setStick {stick} {x} {y}")
+        return self.send_command(f"setStick {stick} {x} {y}", wait_response=False)
 
     def detach_controller(self) -> str:
         return self.send_command("detachController")
 
-    # ── Touch commands ──────────────────────────────────────────────
+    # ── Touch commands (fire-and-forget) ─────────────────────────────
 
     def touch(self, x: int, y: int) -> str:
-        return self.send_command(f"touch {x} {y}")
+        return self.send_command(f"touch {x} {y}", wait_response=False)
 
     def touch_hold(self, x: int, y: int, ms: int) -> str:
-        return self.send_command(f"touchHold {x} {y} {ms}")
+        return self.send_command(f"touchHold {x} {y} {ms}", wait_response=False)
 
     def touch_draw(self, points: list[tuple[int, int]]) -> str:
         flat = " ".join(f"{x} {y}" for x, y in points)
-        return self.send_command(f"touchDraw {flat}")
+        return self.send_command(f"touchDraw {flat}", wait_response=False)
 
     def touch_cancel(self) -> str:
-        return self.send_command("touchCancel")
+        return self.send_command("touchCancel", wait_response=False)
 
     # ── Click sequence ──────────────────────────────────────────────
 
