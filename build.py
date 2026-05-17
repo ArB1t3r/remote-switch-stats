@@ -301,6 +301,12 @@ def build(onedir: bool = False) -> None:
     sep = ";" if is_win else ":"
     cmd.extend(["--add-data", f"src{sep}src"])
 
+    # Bundle default page profiles + reference images
+    defaults_dir = root / "assets" / "default_pages"
+    if defaults_dir.is_dir():
+        cmd.extend(["--add-data", f"{defaults_dir}{sep}assets/default_pages"])
+        print(f"  默认页面配置: {defaults_dir}")
+
     # Include TCL/TK data (fixes "Tcl data directory not found" on Windows)
     # PyInstaller 6+ expects these at _tcl_data and _tk_data inside _internal/
     if is_win:

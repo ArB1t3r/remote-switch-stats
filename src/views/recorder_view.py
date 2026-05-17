@@ -5,13 +5,17 @@ import platform
 import subprocess
 import threading
 import tkinter as tk
+from tkinter import messagebox
 from typing import Optional
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from src.protocol import SwitchConnection
-from src.recorder import PokemonRecorder, RecorderCallbacks, Step, POKEMON_DETAIL_STEPS
+from src.recorder import (
+    PokemonRecorder, RecorderCallbacks, RecorderProgress,
+    Step, POKEMON_DETAIL_STEPS,
+)
 from src.page_profile import load_profiles
 
 
@@ -49,6 +53,10 @@ class RecorderView(ctk.CTkFrame):
         self._selected_idx: Optional[int] = None
         self._drag_idx: Optional[int] = None
         self._drag_target: Optional[int] = None
+        self._is_running = False
+        self._running_step_idx: Optional[int] = None  # 0-indexed current step
+        self._running_pokemon_idx: int = 0            # 1-indexed current pokemon
+        self._completed_step_idx: int = -1            # last completed step (0-indexed)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -201,41 +209,55 @@ class RecorderView(ctk.CTkFrame):
         bar = ctk.CTkFrame(parent, fg_color="#1e1b4b", corner_radius=8, height=36)
         bar.grid(row=1, column=0, padx=4, pady=(2, 4), sticky="ew")
 
-        ctk.CTkButton(
+        self._toolbar_buttons: list[ctk.CTkButton] = []
+
+        btn_add_press = ctk.CTkButton(
             bar, text="+ 按键", width=60, height=26,
             font=("", 10, "bold"), fg_color="#3b82f6", hover_color="#2563eb",
             command=self._add_press_step,
-        ).pack(side="left", padx=(6, 2), pady=5)
+        )
+        btn_add_press.pack(side="left", padx=(6, 2), pady=5)
+        self._toolbar_buttons.append(btn_add_press)
 
-        ctk.CTkButton(
+        btn_add_verify = ctk.CTkButton(
             bar, text="+ 验证", width=60, height=26,
             font=("", 10, "bold"), fg_color="#8b5cf6", hover_color="#7c3aed",
             command=self._add_verify_step,
-        ).pack(side="left", padx=2, pady=5)
+        )
+        btn_add_verify.pack(side="left", padx=2, pady=5)
+        self._toolbar_buttons.append(btn_add_verify)
 
-        ctk.CTkButton(
+        btn_delete = ctk.CTkButton(
             bar, text="\u2716", width=30, height=26,
             font=("", 12), fg_color="#ef4444", hover_color="#dc2626",
             command=self._delete_selected,
-        ).pack(side="left", padx=(8, 2), pady=5)
+        )
+        btn_delete.pack(side="left", padx=(8, 2), pady=5)
+        self._toolbar_buttons.append(btn_delete)
 
-        ctk.CTkButton(
+        btn_up = ctk.CTkButton(
             bar, text="\u25b2", width=28, height=26,
             font=("", 11), fg_color="#6b7280", hover_color="#4b5563",
             command=self._move_up,
-        ).pack(side="left", padx=1, pady=5)
+        )
+        btn_up.pack(side="left", padx=1, pady=5)
+        self._toolbar_buttons.append(btn_up)
 
-        ctk.CTkButton(
+        btn_down = ctk.CTkButton(
             bar, text="\u25bc", width=28, height=26,
             font=("", 11), fg_color="#6b7280", hover_color="#4b5563",
             command=self._move_down,
-        ).pack(side="left", padx=1, pady=5)
+        )
+        btn_down.pack(side="left", padx=1, pady=5)
+        self._toolbar_buttons.append(btn_down)
 
-        ctk.CTkButton(
+        btn_reset = ctk.CTkButton(
             bar, text="重置默认", width=70, height=26,
             font=("", 10), fg_color="#92400e", hover_color="#78350f",
             command=self._reset_steps,
-        ).pack(side="right", padx=(2, 6), pady=5)
+        )
+        btn_reset.pack(side="right", padx=(2, 6), pady=5)
+        self._toolbar_buttons.append(btn_reset)
 
     # ── Step list rendering ──────────────────────────────────────
 
@@ -244,11 +266,19 @@ class RecorderView(ctk.CTkFrame):
             w.destroy()
 
         for i, step in enumerate(self._custom_steps):
-            is_selected = (i == self._selected_idx)
-            is_drag_target = (i == self._drag_target)
+            is_selected = (not self._is_running) and (i == self._selected_idx)
+            is_drag_target = (not self._is_running) and (i == self._drag_target)
 
-            if is_selected:
-                bg = "#4f46e5"
+            # Running-mode states take priority
+            is_current = self._is_running and (i == self._running_step_idx)
+            is_done = self._is_running and (i <= self._completed_step_idx)
+
+            if is_current:
+                bg = "#0e7490"  # cyan — running
+            elif is_done:
+                bg = "#15803d"  # green — done
+            elif is_selected:
+                bg = "#4f46e5"  # indigo — selected
             elif is_drag_target:
                 bg = "#334155"
             else:
@@ -267,19 +297,33 @@ class RecorderView(ctk.CTkFrame):
             row.pack(fill="x", padx=2, pady=1)
             row.pack_propagate(False)
 
-            # Index number
+            # Status indicator (replaces drag handle when running)
+            if is_current:
+                status_text, status_color = "\u25b6", "#fef08a"
+            elif is_done:
+                status_text, status_color = "\u2713", "#bbf7d0"
+            else:
+                status_text, status_color = "", "#6b7280"
+
             idx_lbl = ctk.CTkLabel(
                 row, text=f"{i+1:2d}.", width=28,
-                font=("Consolas", 10), text_color="#6b7280",
+                font=("Consolas", 10),
+                text_color="#94a3b8" if (is_current or is_done) else "#6b7280",
             )
             idx_lbl.pack(side="left", padx=(4, 0))
 
+            if status_text:
+                ctk.CTkLabel(
+                    row, text=status_text, width=14,
+                    font=("", 12, "bold"), text_color=status_color,
+                ).pack(side="left", padx=(0, 2))
+
             # Step type indicator
             if step.is_verify:
-                type_color = "#a78bfa"
+                type_color = "#fef08a" if is_current else ("#dcfce7" if is_done else "#a78bfa")
                 type_text = "验证"
             else:
-                type_color = "#38bdf8"
+                type_color = "#fef08a" if is_current else ("#dcfce7" if is_done else "#38bdf8")
                 type_text = step.button
             type_lbl = ctk.CTkLabel(
                 row, text=type_text, width=50,
@@ -289,32 +333,42 @@ class RecorderView(ctk.CTkFrame):
 
             # Description
             desc = step.verify_page if step.is_verify else step.screenshot_name
-            text_color = "#e2e8f0" if is_selected else "#cbd5e1"
+            if is_current or is_done:
+                text_color = "#ffffff"
+            elif is_selected:
+                text_color = "#e2e8f0"
+            else:
+                text_color = "#cbd5e1"
             desc_lbl = ctk.CTkLabel(
                 row, text=desc, anchor="w",
                 font=("Consolas", 11), text_color=text_color,
             )
             desc_lbl.pack(side="left", fill="x", expand=True, padx=2)
 
-            # Drag handle
-            handle = ctk.CTkLabel(
-                row, text="\u2630", width=20,
-                font=("", 12), text_color="#4b5563", cursor="hand2",
+            # Drag handle (hidden during running)
+            if not self._is_running:
+                handle = ctk.CTkLabel(
+                    row, text="\u2630", width=20,
+                    font=("", 12), text_color="#4b5563", cursor="hand2",
+                )
+                handle.pack(side="right", padx=(2, 6))
+
+                handle.bind("<Button-1>", lambda e, idx=i: self._on_drag_start(e, idx))
+                handle.bind("<B1-Motion>", self._on_drag_motion)
+                handle.bind("<ButtonRelease-1>", self._on_drag_end)
+
+                # Bind click to select
+                for widget in (row, idx_lbl, type_lbl, desc_lbl):
+                    widget.bind("<Button-1>", lambda e, idx=i: self._on_click(idx))
+
+        if self._is_running:
+            self._step_count_label.configure(
+                text=f"运行中 · 宝可梦 {self._running_pokemon_idx} · 步骤 {(self._running_step_idx or 0) + 1}/{len(self._custom_steps)}"
             )
-            handle.pack(side="right", padx=(2, 6))
-
-            # Bind click to select
-            for widget in (row, idx_lbl, type_lbl, desc_lbl):
-                widget.bind("<Button-1>", lambda e, idx=i: self._on_click(idx))
-
-            # Bind drag on handle
-            handle.bind("<Button-1>", lambda e, idx=i: self._on_drag_start(e, idx))
-            handle.bind("<B1-Motion>", self._on_drag_motion)
-            handle.bind("<ButtonRelease-1>", self._on_drag_end)
-
-        self._step_count_label.configure(
-            text=f"共 {len(self._custom_steps)} 步  |  点击选中 · 拖拽 \u2630 排序"
-        )
+        else:
+            self._step_count_label.configure(
+                text=f"共 {len(self._custom_steps)} 步  |  点击选中 · 拖拽 \u2630 排序"
+            )
 
     def _on_click(self, idx: int) -> None:
         self._selected_idx = idx if self._selected_idx != idx else None
@@ -465,6 +519,12 @@ class RecorderView(ctk.CTkFrame):
             ),
             on_error=lambda msg: self.after(0, lambda m=msg: self._log(f"[ERROR] {m}")),
             on_complete=lambda d: self.after(0, lambda: self._on_complete(d)),
+            on_verify_failed=lambda page, prog: self.after(
+                0, lambda p=page, pr=prog: self._on_verify_failed(p, pr),
+            ),
+            on_state_changed=lambda is_run: self.after(
+                0, lambda r=is_run: self._set_running_state(r),
+            ),
         )
 
         self._recorder = PokemonRecorder(
@@ -518,6 +578,36 @@ class RecorderView(ctk.CTkFrame):
         self._progress_label.configure(
             text=f"Pokemon {poke_idx}/{poke_total}  |  步骤 {step_idx}/{step_total}",
         )
+        self._running_pokemon_idx = poke_idx
+        self._completed_step_idx = self._running_step_idx if self._running_step_idx is not None else -1
+        # New pokemon — reset completed marker
+        if step_idx == 1:
+            self._completed_step_idx = -1
+        self._running_step_idx = step_idx - 1
+        self._render_step_list()
+
+    def _set_running_state(self, is_running: bool) -> None:
+        self._is_running = is_running
+        for btn in self._toolbar_buttons:
+            btn.configure(state="disabled" if is_running else "normal")
+        if not is_running:
+            self._running_step_idx = None
+            self._completed_step_idx = -1
+        self._render_step_list()
+
+    def _on_verify_failed(self, page_name: str, progress: RecorderProgress) -> None:
+        title = "验证失败"
+        msg = (
+            f"页面验证失败: 「{page_name}」\n\n"
+            f"进度统计:\n"
+            f"  · 已完成宝可梦: {progress.pokemon_done} / {progress.pokemon_total}\n"
+            f"  · 当前正在采集第 {progress.current_pokemon} 只\n"
+            f"  · 当前步骤: {progress.current_step} / {progress.total_steps_per_pokemon}\n"
+            f"  · 已保存截图: {progress.screenshots_taken} 张\n\n"
+            "采集已暂停，请检查 Switch 当前界面后点「继续」恢复，或点「停止」结束采集。"
+        )
+        self._log(f"[暂停] {title}: {page_name}")
+        messagebox.showwarning(title, msg, parent=self.winfo_toplevel())
 
     def _show_preview(self, img: Image.Image, name: str) -> None:
         cw = max(self._preview_canvas.winfo_width(), 320)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,10 +56,32 @@ class PageProfile:
 
 
 def _get_data_root() -> Path:
-    """Return the root directory for page profile data (next to exe or project root)."""
+    """Return the root directory for user-writable page profile data."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
+
+
+def _get_bundled_defaults_dir() -> Path:
+    """
+    Return the directory containing the bundled default page profiles + reference
+    images. In a PyInstaller bundle this lives under _MEIPASS or _internal.
+    """
+    if getattr(sys, "frozen", False):
+        # PyInstaller --add-data preserves the assets/default_pages structure
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidate = Path(meipass) / "assets" / "default_pages"
+            if candidate.exists():
+                return candidate
+        # Onedir mode: assets sits inside _internal/
+        exe_dir = Path(sys.executable).parent
+        for sub in ("_internal/assets/default_pages", "assets/default_pages"):
+            candidate = exe_dir / sub
+            if candidate.exists():
+                return candidate
+        return exe_dir / "_internal" / "assets" / "default_pages"
+    return Path(__file__).resolve().parent.parent / "assets" / "default_pages"
 
 
 def get_profiles_path() -> Path:
@@ -71,11 +94,53 @@ def get_refs_dir() -> Path:
     return d
 
 
+def _initialize_from_defaults() -> bool:
+    """
+    First-run setup: copy the bundled default page_profiles.json and reference
+    images into the user data directory. Returns True if defaults were applied.
+    """
+    defaults_dir = _get_bundled_defaults_dir()
+    defaults_json = defaults_dir / "page_profiles.json"
+    if not defaults_json.exists():
+        return False
+
+    user_path = get_profiles_path()
+    try:
+        user_path.write_text(
+            defaults_json.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+    except Exception:
+        return False
+
+    refs_dir = get_refs_dir()
+    for img in defaults_dir.glob("*.jpg"):
+        target = refs_dir / img.name
+        if not target.exists():
+            try:
+                shutil.copy2(img, target)
+            except Exception:
+                pass
+    for img in defaults_dir.glob("*.png"):
+        target = refs_dir / img.name
+        if not target.exists():
+            try:
+                shutil.copy2(img, target)
+            except Exception:
+                pass
+
+    return True
+
+
 def load_profiles() -> list[PageProfile]:
-    """Load all page profiles from the JSON file."""
+    """Load all page profiles from the JSON file. On first run, seed from bundled defaults."""
     path = get_profiles_path()
     if not path.exists():
+        _initialize_from_defaults()
+
+    if not path.exists():
         return []
+
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return [PageProfile.from_dict(p) for p in data]

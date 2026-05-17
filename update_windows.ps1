@@ -93,6 +93,14 @@ try {
         Write-Host "  Updated: src/ (entire directory)" -ForegroundColor Gray
     }
 
+    $assetsDir = Join-Path $sourceRoot "assets"
+    if (Test-Path $assetsDir) {
+        $targetAssets = Join-Path $targetRoot "assets"
+        if (Test-Path $targetAssets) { Remove-Item $targetAssets -Recurse -Force }
+        Copy-Item -Path $assetsDir -Destination $targetAssets -Recurse -Force
+        Write-Host "  Updated: assets/ (default page profiles + images)" -ForegroundColor Gray
+    }
+
     Write-Host "  Source files updated" -ForegroundColor Green
 } catch {
     Write-Host "  [ERROR] Extract/copy failed: $_" -ForegroundColor Red
