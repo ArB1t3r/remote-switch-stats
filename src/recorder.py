@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from PIL import Image
 
 from src.protocol import SwitchConnection
+from src.page_profile import load_profiles
 
 
 # ── Step definitions ────────────────────────────────────────────────
@@ -27,9 +28,20 @@ from src.protocol import SwitchConnection
 @dataclass
 class Step:
     """One atomic action in the recording sequence."""
-    button: str            # button to click before capturing
+    button: str            # button to click before capturing (or "" for verify-only steps)
     screenshot_name: str   # semantic filename (without extension)
     wait_ms: int = 500     # sleep after click, before capture
+    action: str = "press"  # "press" = click+capture, "verify" = page check only
+    verify_page: str = ""  # page profile name to verify (for action="verify")
+
+    @property
+    def is_verify(self) -> bool:
+        return self.action == "verify"
+
+    def display_label(self) -> str:
+        if self.is_verify:
+            return f"[验证] {self.verify_page}"
+        return self.screenshot_name
 
 
 POKEMON_DETAIL_STEPS: list[Step] = [
@@ -153,6 +165,8 @@ class PokemonRecorder:
     DEFAULT_DIFF_THRESHOLD = 0.02  # 2% RMSE — very conservative
     DEFAULT_MAX_RETRIES = 3
 
+    LIST_PAGE_PROFILE_NAME = "宝可梦列表"
+
     def __init__(
         self,
         conn: SwitchConnection,
@@ -162,6 +176,7 @@ class PokemonRecorder:
         max_retries: int = DEFAULT_MAX_RETRIES,
         save_root: Optional[str] = None,
         callbacks: Optional[RecorderCallbacks] = None,
+        steps: Optional[list[Step]] = None,
     ) -> None:
         self._conn = conn
         self._pokemon_count = pokemon_count
@@ -171,10 +186,21 @@ class PokemonRecorder:
         self._running = False
         self._paused = False
         self._cb = callbacks or RecorderCallbacks()
+        self._page_matcher: Optional[object] = None
+
+        self._steps = steps if steps is not None else list(POKEMON_DETAIL_STEPS)
+
+        # Load page profiles for verification
+        try:
+            from src.page_matcher import PageMatcher
+            profiles = load_profiles()
+            if profiles:
+                self._page_matcher = PageMatcher(profiles)
+        except Exception:
+            pass
 
         if save_root is None:
             if getattr(sys, "frozen", False):
-                # Bundled exe: save next to the executable
                 save_root = os.path.join(os.path.dirname(sys.executable), "captures")
             else:
                 save_root = os.path.join(os.path.dirname(os.path.dirname(__file__)), "captures")
@@ -206,9 +232,9 @@ class PokemonRecorder:
         Call from a worker thread.
         """
         self._running = True
-        total_steps = len(POKEMON_DETAIL_STEPS)
+        total_steps = len(self._steps)
 
-        self._cb.on_log(f"开始采集 {self._pokemon_count} 只宝可梦")
+        self._cb.on_log(f"开始采集 {self._pokemon_count} 只宝可梦 ({total_steps} 步/只)")
         self._cb.on_log(f"保存目录: {self._session_dir}")
 
         # Capture the list page as reference for verification
@@ -235,12 +261,27 @@ class PokemonRecorder:
 
             prev_img: Optional[Image.Image] = None
 
-            for step_idx, step in enumerate(POKEMON_DETAIL_STEPS):
+            for step_idx, step in enumerate(self._steps):
                 if not self._running:
                     break
                 self._wait_if_paused()
 
                 self._cb.on_progress(poke_num, self._pokemon_count, step_idx + 1, total_steps)
+
+                # Handle verify-type steps
+                if step.is_verify:
+                    verified = self._execute_verify_step(step)
+                    if not verified:
+                        self._cb.on_error(
+                            f"Pokemon #{poke_num} 验证 [{step.verify_page}] 失败，已暂停"
+                        )
+                        self._paused = True
+                        self._wait_if_paused()
+                        if not self._running:
+                            break
+                    else:
+                        self._cb.on_log(f"  [{step_idx+1}/{total_steps}] [验证] {step.verify_page} -> OK")
+                    continue
 
                 success, img = self._execute_step(step, prev_img)
 
@@ -319,35 +360,84 @@ class PokemonRecorder:
 
         return False, self._capture()
 
+    # ── Verify step execution ────────────────────────────────────────
+
+    def _execute_verify_step(self, step: Step) -> bool:
+        """Execute a verify-type step: check if current screen matches the named page."""
+        if not self._page_matcher or not step.verify_page:
+            self._cb.on_log(f"    [验证] 跳过: 无页面配置 '{step.verify_page}'")
+            return True  # no matcher = pass through
+
+        from src.page_matcher import PageMatcher
+        matcher: PageMatcher = self._page_matcher  # type: ignore
+
+        for attempt in range(1, 4):
+            img = self._capture()
+            if img is None:
+                self._cb.on_log(f"    [验证] 尝试 {attempt}: 截图失败")
+                time.sleep(0.5)
+                continue
+
+            if matcher.is_page(img, step.verify_page):
+                return True
+
+            profile = next((p for p in matcher.profiles if p.name == step.verify_page), None)
+            if profile:
+                score = matcher.match_score(img, profile)
+                self._cb.on_log(f"    [验证] 尝试 {attempt}: 得分={score:.4f} — 未匹配 '{step.verify_page}'")
+
+            time.sleep(0.5)
+
+        return False
+
     # ── List page verification ────────────────────────────────────────
 
     def _exit_to_list(self) -> bool:
         """Press B and verify we returned to the list page using image comparison."""
         max_attempts = 5
+        use_profile = (
+            self._page_matcher is not None
+            and hasattr(self._page_matcher, "is_page")
+        )
+
         for attempt in range(1, max_attempts + 1):
-            self._click_and_wait(EXIT_BUTTON, 1000)  # 1s wait for page transition
+            self._click_and_wait(EXIT_BUTTON, 1000)
             img = self._capture()
             if img is None:
                 self._cb.on_log(f"    退出尝试 {attempt}: 截图失败")
                 continue
 
-            # Log comparison scores for debugging
-            scores = []
-            for i, region in enumerate(LIST_PAGE_VERIFY_REGIONS):
-                score = region_match_score(img, self._list_reference, region)
-                scores.append(score)
-            self._cb.on_log(
-                f"    比对得分: 左区={scores[0]:.4f} 顶区={scores[1]:.4f} "
-                f"(阈值<{LIST_PAGE_MATCH_THRESHOLD})"
-            )
-
-            if self._list_reference and is_list_page(img, self._list_reference):
-                if attempt > 1:
-                    self._cb.on_log(f"    第 {attempt} 次尝试后确认回到列表页")
+            # Strategy 1: Use saved page profile (preferred)
+            if use_profile:
+                from src.page_matcher import PageMatcher, _region_rmse
+                matcher: PageMatcher = self._page_matcher  # type: ignore
+                if matcher.is_page(img, self.LIST_PAGE_PROFILE_NAME):
+                    score = matcher.match_score(img, next(
+                        p for p in matcher.profiles if p.name == self.LIST_PAGE_PROFILE_NAME
+                    ))
+                    self._cb.on_log(f"    [配置匹配] 得分={score:.4f} — 确认在列表页")
+                    return True
                 else:
+                    score = matcher.match_score(img, next(
+                        (p for p in matcher.profiles if p.name == self.LIST_PAGE_PROFILE_NAME),
+                        None,  # type: ignore
+                    )) if any(p.name == self.LIST_PAGE_PROFILE_NAME for p in matcher.profiles) else 1.0
+                    self._cb.on_log(f"    [配置匹配] 得分={score:.4f} — 未匹配")
+
+            # Strategy 2: Fallback to runtime reference
+            elif self._list_reference:
+                scores = []
+                for region in LIST_PAGE_VERIFY_REGIONS:
+                    score = region_match_score(img, self._list_reference, region)
+                    scores.append(score)
+                self._cb.on_log(
+                    f"    比对得分: 左区={scores[0]:.4f} 顶区={scores[1]:.4f} "
+                    f"(阈值<{LIST_PAGE_MATCH_THRESHOLD})"
+                )
+                if is_list_page(img, self._list_reference):
                     self._cb.on_log(f"    已确认回到列表页")
-                self._list_reference = img
-                return True
+                    self._list_reference = img
+                    return True
 
             self._cb.on_log(f"    退出尝试 {attempt}: 未检测到列表页面，再按 B...")
             time.sleep(0.5)

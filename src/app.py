@@ -14,6 +14,7 @@ from src.views.memory_view import MemoryView
 from src.views.screen_view import ScreenView
 from src.views.macro_view import MacroView
 from src.views.recorder_view import RecorderView
+from src.views.page_config_view import PageConfigView
 
 
 APP_TITLE = "Switch Remote Control — sys-botbase Client"
@@ -85,8 +86,9 @@ class App(ctk.CTk):
         tab_mem = self._tabview.add("内存工具")
         tab_screen = self._tabview.add("屏幕捕捉")
         tab_macro = self._tabview.add("宏序列")
+        tab_page_config = self._tabview.add("页面配置")
 
-        for tab in (tab_setup, tab_ctrl, tab_recorder, tab_mem, tab_screen, tab_macro):
+        for tab in (tab_setup, tab_ctrl, tab_recorder, tab_mem, tab_screen, tab_macro, tab_page_config):
             tab.grid_columnconfigure(0, weight=1)
             tab.grid_rowconfigure(0, weight=1)
 
@@ -107,6 +109,9 @@ class App(ctk.CTk):
 
         self._macro_view = MacroView(tab_macro, self._conn)
         self._macro_view.grid(row=0, column=0, sticky="nsew")
+
+        self._page_config_view = PageConfigView(tab_page_config, self._conn)
+        self._page_config_view.grid(row=0, column=0, sticky="nsew")
 
     # ── Status bar ─────────────────────────────────────────────────
 
