@@ -44,6 +44,9 @@ CONFIGURE_KEYS = [
 class SwitchConnection:
     """Persistent TCP connection to a sys-botbase instance."""
 
+    MAX_RECONNECT_ATTEMPTS = 3
+    RECONNECT_DELAY = 1.5  # seconds between retries
+
     def __init__(self) -> None:
         self._sock: Optional[socket.socket] = None
         self._lock = threading.Lock()
@@ -51,6 +54,8 @@ class SwitchConnection:
         self._port: int = SYSBOT_PORT
         self._connected = False
         self._on_status_change: Optional[Callable[[bool], None]] = None
+        self._auto_reconnect = True
+        self._reconnecting = False
 
     @property
     def connected(self) -> bool:
@@ -59,6 +64,14 @@ class SwitchConnection:
     @property
     def ip(self) -> Optional[str]:
         return self._ip
+
+    @property
+    def auto_reconnect(self) -> bool:
+        return self._auto_reconnect
+
+    @auto_reconnect.setter
+    def auto_reconnect(self, value: bool) -> None:
+        self._auto_reconnect = value
 
     def set_status_callback(self, cb: Callable[[bool], None]) -> None:
         self._on_status_change = cb
@@ -102,6 +115,36 @@ class SwitchConnection:
             return "没有可用的 IP 地址"
         return self.connect(self._ip, self._port)
 
+    def _try_reconnect(self) -> bool:
+        """Attempt to re-establish the connection. Must be called WITHOUT holding _lock."""
+        if not self._auto_reconnect or not self._ip:
+            return False
+        if self._reconnecting:
+            return False
+
+        self._reconnecting = True
+        try:
+            for attempt in range(1, self.MAX_RECONNECT_ATTEMPTS + 1):
+                time.sleep(self.RECONNECT_DELAY)
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(SOCKET_TIMEOUT)
+                    s.connect((self._ip, self._port))
+                    with self._lock:
+                        if self._sock:
+                            try:
+                                self._sock.close()
+                            except OSError:
+                                pass
+                        self._sock = s
+                    self._notify(True)
+                    return True
+                except (socket.timeout, OSError):
+                    continue
+            return False
+        finally:
+            self._reconnecting = False
+
     # ── Low-level send / receive ────────────────────────────────────
 
     def send_command(self, cmd: str, wait_response: bool = True) -> str:
@@ -117,7 +160,14 @@ class SwitchConnection:
                 return self._recv_line()
             except (socket.timeout, OSError) as e:
                 self._notify(False)
-                return f"[通信错误] {e}"
+                # Release the lock before reconnecting
+                pass
+
+        # Auto-reconnect outside the lock
+        if self._auto_reconnect and self._ip:
+            if self._try_reconnect():
+                return self.send_command(cmd, wait_response)
+        return "[通信错误] 连接已断开，重连失败"
 
     def send_command_raw(self, cmd: str) -> bytes:
         """Send command and return raw bytes (for pixelPeek)."""
@@ -129,7 +179,13 @@ class SwitchConnection:
                 return self._recv_raw()
             except (socket.timeout, OSError):
                 self._notify(False)
-                return b""
+                pass
+
+        # Auto-reconnect outside the lock
+        if self._auto_reconnect and self._ip:
+            if self._try_reconnect():
+                return self.send_command_raw(cmd)
+        return b""
 
     def _recv_line(self) -> str:
         buf = b""
