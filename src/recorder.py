@@ -10,6 +10,7 @@ proceeding (with automatic retries).
 import io
 import math
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -50,12 +51,13 @@ NEXT_POKEMON_BUTTON = "DDOWN"
 
 # Crop regions used to verify we're back on the list page (1280x720 coordinates).
 # These regions contain stable UI elements that don't change between pokemon.
+# Using generous areas to tolerate slight position differences.
 LIST_PAGE_VERIFY_REGIONS = [
-    (100, 295, 280, 345),   # "X 单打对战" button area
-    (590, 22, 900, 60),     # "训练家 好友 宝可梦" tab bar
+    (75, 270, 310, 390),    # Left panel: "X 单打对战" + "详细规则" area
+    (560, 10, 930, 70),     # Top-right: "训练家 好友 宝可梦" tab bar
 ]
 
-LIST_PAGE_MATCH_THRESHOLD = 0.03  # max RMSE to consider regions matching
+LIST_PAGE_MATCH_THRESHOLD = 0.12  # max RMSE — forgiving for animation/highlight changes
 
 
 # ── Image utilities ─────────────────────────────────────────────────
@@ -171,7 +173,11 @@ class PokemonRecorder:
         self._cb = callbacks or RecorderCallbacks()
 
         if save_root is None:
-            save_root = os.path.join(os.path.dirname(os.path.dirname(__file__)), "captures")
+            if getattr(sys, "frozen", False):
+                # Bundled exe: save next to the executable
+                save_root = os.path.join(os.path.dirname(sys.executable), "captures")
+            else:
+                save_root = os.path.join(os.path.dirname(os.path.dirname(__file__)), "captures")
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._session_dir = os.path.join(save_root, ts)
 
@@ -319,23 +325,32 @@ class PokemonRecorder:
         """Press B and verify we returned to the list page using image comparison."""
         max_attempts = 5
         for attempt in range(1, max_attempts + 1):
-            self._click_and_wait(EXIT_BUTTON, 800)  # longer wait for page transition
+            self._click_and_wait(EXIT_BUTTON, 1000)  # 1s wait for page transition
             img = self._capture()
             if img is None:
                 self._cb.on_log(f"    退出尝试 {attempt}: 截图失败")
                 continue
+
+            # Log comparison scores for debugging
+            scores = []
+            for i, region in enumerate(LIST_PAGE_VERIFY_REGIONS):
+                score = region_match_score(img, self._list_reference, region)
+                scores.append(score)
+            self._cb.on_log(
+                f"    比对得分: 左区={scores[0]:.4f} 顶区={scores[1]:.4f} "
+                f"(阈值<{LIST_PAGE_MATCH_THRESHOLD})"
+            )
 
             if self._list_reference and is_list_page(img, self._list_reference):
                 if attempt > 1:
                     self._cb.on_log(f"    第 {attempt} 次尝试后确认回到列表页")
                 else:
                     self._cb.on_log(f"    已确认回到列表页")
-                # Update reference (list selection might have moved)
                 self._list_reference = img
                 return True
 
             self._cb.on_log(f"    退出尝试 {attempt}: 未检测到列表页面，再按 B...")
-            time.sleep(0.3)
+            time.sleep(0.5)
 
         self._cb.on_log(f"    {max_attempts} 次尝试后仍未回到列表页")
         return False
