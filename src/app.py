@@ -9,6 +9,7 @@ from src.views.controller_view import ControllerView
 from src.views.memory_view import MemoryView
 from src.views.screen_view import ScreenView
 from src.views.macro_view import MacroView
+from src.views.recorder_view import RecorderView
 
 
 APP_TITLE = "Switch Remote Control — sys-botbase Client"
@@ -56,11 +57,12 @@ class App(ctk.CTk):
 
         tab_setup = self._tabview.add("设置与连接")
         tab_ctrl = self._tabview.add("控制器")
+        tab_recorder = self._tabview.add("信息采集")
         tab_mem = self._tabview.add("内存工具")
         tab_screen = self._tabview.add("屏幕捕捉")
         tab_macro = self._tabview.add("宏序列")
 
-        for tab in (tab_setup, tab_ctrl, tab_mem, tab_screen, tab_macro):
+        for tab in (tab_setup, tab_ctrl, tab_recorder, tab_mem, tab_screen, tab_macro):
             tab.grid_columnconfigure(0, weight=1)
             tab.grid_rowconfigure(0, weight=1)
 
@@ -69,6 +71,9 @@ class App(ctk.CTk):
 
         self._ctrl_view = ControllerView(tab_ctrl, self._conn)
         self._ctrl_view.grid(row=0, column=0, sticky="nsew")
+
+        self._recorder_view = RecorderView(tab_recorder, self._conn)
+        self._recorder_view.grid(row=0, column=0, sticky="nsew")
 
         self._mem_view = MemoryView(tab_mem, self._conn)
         self._mem_view.grid(row=0, column=0, sticky="nsew")
