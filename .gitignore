@@ -12,3 +12,4 @@ captures/
 .build_sha
 page_profiles.json
 page_refs/
+recorder_steps.json

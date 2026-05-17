@@ -16,6 +16,7 @@ from src.protocol import SwitchConnection
 from src.recorder import (
     PokemonRecorder, RecorderCallbacks, RecorderProgress,
     Step, POKEMON_DETAIL_STEPS,
+    load_steps, save_steps,
 )
 from src.page_profile import load_profiles
 
@@ -50,7 +51,8 @@ class RecorderView(ctk.CTkFrame):
         self._conn = conn
         self._recorder: Optional[PokemonRecorder] = None
         self._photo_ref: Optional[ImageTk.PhotoImage] = None
-        self._custom_steps: list[Step] = list(POKEMON_DETAIL_STEPS)
+        saved = load_steps()
+        self._custom_steps: list[Step] = saved if saved else list(POKEMON_DETAIL_STEPS)
         self._selected_idx: Optional[int] = None
         self._drag_idx: Optional[int] = None
         self._drag_target: Optional[int] = None
@@ -89,8 +91,8 @@ class RecorderView(ctk.CTkFrame):
         row.grid_columnconfigure(8, weight=1)
 
         ctk.CTkLabel(row, text="采集数量:").grid(row=0, column=0, padx=(0, 4), sticky="w")
-        self._count_entry = ctk.CTkEntry(row, width=60, placeholder_text="6")
-        self._count_entry.insert(0, "6")
+        self._count_entry = ctk.CTkEntry(row, width=60, placeholder_text="20")
+        self._count_entry.insert(0, "20")
         self._count_entry.grid(row=0, column=1, padx=(0, 16))
 
         ctk.CTkLabel(row, text="每步等待(ms):").grid(row=0, column=2, padx=(0, 4), sticky="w")
@@ -99,8 +101,8 @@ class RecorderView(ctk.CTkFrame):
         self._wait_entry.grid(row=0, column=3, padx=(0, 16))
 
         ctk.CTkLabel(row, text="差异阈值:").grid(row=0, column=4, padx=(0, 4), sticky="w")
-        self._threshold_entry = ctk.CTkEntry(row, width=70, placeholder_text="0.02")
-        self._threshold_entry.insert(0, "0.02")
+        self._threshold_entry = ctk.CTkEntry(row, width=70, placeholder_text="0.1")
+        self._threshold_entry.insert(0, "0.1")
         self._threshold_entry.grid(row=0, column=5, padx=(0, 16))
 
         ctk.CTkLabel(row, text="最大重试:").grid(row=0, column=6, padx=(0, 4), sticky="w")
@@ -411,16 +413,24 @@ class RecorderView(ctk.CTkFrame):
             self._render_step_list()
 
     def _on_drag_end(self, event: tk.Event) -> None:
+        moved = False
         if self._drag_idx is not None and self._drag_target is not None:
             if self._drag_idx != self._drag_target:
                 step = self._custom_steps.pop(self._drag_idx)
                 self._custom_steps.insert(self._drag_target, step)
                 self._selected_idx = self._drag_target
+                moved = True
         self._drag_idx = None
         self._drag_target = None
+        if moved:
+            self._persist_steps()
         self._render_step_list()
 
     # ── Editor actions ───────────────────────────────────────────
+
+    def _persist_steps(self) -> None:
+        """Save the current step sequence to disk (best-effort, non-blocking)."""
+        save_steps(self._custom_steps)
 
     def _add_press_step(self) -> None:
         dialog = _PressStepDialog(self)
@@ -431,6 +441,7 @@ class RecorderView(ctk.CTkFrame):
             insert_at = (self._selected_idx + 1) if self._selected_idx is not None else len(self._custom_steps)
             self._custom_steps.insert(insert_at, step)
             self._selected_idx = insert_at
+            self._persist_steps()
             self._render_step_list()
 
     def _add_verify_step(self) -> None:
@@ -445,6 +456,7 @@ class RecorderView(ctk.CTkFrame):
             insert_at = (self._selected_idx + 1) if self._selected_idx is not None else len(self._custom_steps)
             self._custom_steps.insert(insert_at, step)
             self._selected_idx = insert_at
+            self._persist_steps()
             self._render_step_list()
 
     def _delete_selected(self) -> None:
@@ -453,6 +465,7 @@ class RecorderView(ctk.CTkFrame):
         del self._custom_steps[self._selected_idx]
         if self._selected_idx >= len(self._custom_steps):
             self._selected_idx = len(self._custom_steps) - 1 if self._custom_steps else None
+        self._persist_steps()
         self._render_step_list()
 
     def _move_up(self) -> None:
@@ -461,6 +474,7 @@ class RecorderView(ctk.CTkFrame):
             return
         self._custom_steps[idx - 1], self._custom_steps[idx] = self._custom_steps[idx], self._custom_steps[idx - 1]
         self._selected_idx = idx - 1
+        self._persist_steps()
         self._render_step_list()
 
     def _move_down(self) -> None:
@@ -469,11 +483,13 @@ class RecorderView(ctk.CTkFrame):
             return
         self._custom_steps[idx + 1], self._custom_steps[idx] = self._custom_steps[idx], self._custom_steps[idx + 1]
         self._selected_idx = idx + 1
+        self._persist_steps()
         self._render_step_list()
 
     def _reset_steps(self) -> None:
         self._custom_steps = list(POKEMON_DETAIL_STEPS)
         self._selected_idx = None
+        self._persist_steps()
         self._render_step_list()
 
     # ── Log ────────────────────────────────────────────────────────

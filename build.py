@@ -261,6 +261,7 @@ USER_DATA_ITEMS = (
     "page_profiles.json",   # user's saved page configs
     "page_refs",            # user's reference screenshots
     "captures",             # past collection sessions (don't lose data)
+    "recorder_steps.json",  # user's customized recorder step sequence
 )
 
 

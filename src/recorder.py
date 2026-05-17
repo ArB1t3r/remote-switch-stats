@@ -8,6 +8,7 @@ proceeding (with automatic retries).
 """
 
 import io
+import json
 import math
 import os
 import sys
@@ -20,7 +21,7 @@ from typing import Callable, Optional
 from PIL import Image
 
 from src.protocol import SwitchConnection
-from src.page_profile import load_profiles
+from src.page_profile import load_profiles, _get_data_root
 
 
 # ── Step definitions ────────────────────────────────────────────────
@@ -57,6 +58,61 @@ POKEMON_DETAIL_STEPS: list[Step] = [
     Step("DUP",    "10_evs_2"),
     Step("DRIGHT", "11_ability"),
 ]
+
+
+# ── Step persistence ────────────────────────────────────────────────
+
+STEPS_FILE_NAME = "recorder_steps.json"
+
+
+def _step_to_dict(step: Step) -> dict:
+    return {
+        "button": step.button,
+        "screenshot_name": step.screenshot_name,
+        "wait_ms": step.wait_ms,
+        "action": step.action,
+        "verify_page": step.verify_page,
+    }
+
+
+def _step_from_dict(d: dict) -> Step:
+    return Step(
+        button=d.get("button", ""),
+        screenshot_name=d.get("screenshot_name", ""),
+        wait_ms=d.get("wait_ms", 500),
+        action=d.get("action", "press"),
+        verify_page=d.get("verify_page", ""),
+    )
+
+
+def get_steps_path() -> Path:
+    return _get_data_root() / STEPS_FILE_NAME
+
+
+def load_steps() -> Optional[list[Step]]:
+    """Load saved step sequence. Returns None if no saved file exists."""
+    path = get_steps_path()
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return [_step_from_dict(s) for s in data]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+def save_steps(steps: list[Step]) -> None:
+    """Persist the step sequence to disk."""
+    path = get_steps_path()
+    data = [_step_to_dict(s) for s in steps]
+    try:
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
 
 # ── Image utilities ─────────────────────────────────────────────────
 
