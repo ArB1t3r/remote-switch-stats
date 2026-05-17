@@ -10,10 +10,12 @@ Windows 用户请直接双击 build_windows.bat，会自动处理所有环境依
 """
 
 import argparse
+import json
 import platform
 import shutil
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 APP_NAME = "SwitchRemote"
@@ -29,6 +31,51 @@ HIDDEN_IMPORTS = [
 COLLECT_PACKAGES = [
     "customtkinter",
 ]
+
+
+GITHUB_OWNER = "ArB1t3r"
+GITHUB_REPO = "remote-switch-stats"
+
+
+def write_build_sha(dist_path: Path) -> None:
+    """Write current commit SHA to .build_sha in both project root and dist output."""
+    sha = ""
+
+    # Try git first
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            sha = result.stdout.strip()[:12]
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Fallback: query GitHub API
+    if not sha:
+        try:
+            url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/commits/main"
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "SwitchRemote-Build",
+                "Accept": "application/vnd.github.v3+json",
+            })
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                sha = data.get("sha", "")[:12]
+        except Exception:
+            pass
+
+    if not sha:
+        sha = "unknown"
+
+    root = Path(__file__).parent.resolve()
+    # Write to project root
+    (root / ".build_sha").write_text(sha, encoding="utf-8")
+    # Write to dist output (for bundled exe)
+    dist_sha = dist_path / ".build_sha" if dist_path.is_dir() else dist_path.parent / ".build_sha"
+    dist_sha.write_text(sha, encoding="utf-8")
+    print(f"  Build SHA: {sha}")
 
 
 def preflight_check() -> None:
@@ -135,6 +182,9 @@ def build(onedir: bool = False) -> None:
         else:
             suffix = ".exe" if is_win else ""
             out = root / "dist" / f"{APP_NAME}{suffix}"
+
+        write_build_sha(out)
+
         print("\n" + "=" * 60)
         print("  打包成功!")
         print(f"  输出路径: {out}")
