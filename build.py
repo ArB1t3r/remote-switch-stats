@@ -125,6 +125,105 @@ def preflight_check() -> None:
         sys.exit(1)
 
 
+def _find_tcl_tk_dirs() -> tuple[str, str]:
+    """
+    Locate TCL and TK data directories without creating a Tk window.
+    Returns (tcl_lib_path, tk_lib_path). Either may be "" if not found.
+    """
+    tcl_lib = ""
+    tk_lib = ""
+
+    # Strategy 1: Use Tcl() interpreter (no display needed)
+    try:
+        import tkinter
+        tcl = tkinter.Tcl()
+        tcl_lib = tcl.eval("info library")
+        # TK library is usually a sibling directory
+        tk_version = tcl.eval("package require Tk")
+        tk_lib = os.path.join(os.path.dirname(tcl_lib), f"tk{tk_version}")
+        if not os.path.isdir(tk_lib):
+            # Try without minor version
+            major_minor = ".".join(tk_version.split(".")[:2])
+            tk_lib = os.path.join(os.path.dirname(tcl_lib), f"tk{major_minor}")
+        tcl.destroy()
+    except Exception:
+        pass
+
+    # Strategy 2: Search common locations relative to sys.prefix
+    if not tcl_lib or not os.path.isdir(tcl_lib):
+        prefix = Path(sys.prefix)
+        candidates = [
+            prefix / "tcl",
+            prefix / "lib",
+            prefix / "Library" / "lib",
+        ]
+        for base in candidates:
+            if not base.is_dir():
+                continue
+            for d in sorted(base.iterdir(), reverse=True):
+                if d.name.startswith("tcl8") or d.name.startswith("tcl9"):
+                    if (d / "init.tcl").exists():
+                        tcl_lib = str(d)
+                        break
+            if tcl_lib:
+                break
+
+    if not tk_lib or not os.path.isdir(tk_lib):
+        if tcl_lib:
+            parent = Path(tcl_lib).parent
+            for d in sorted(parent.iterdir(), reverse=True):
+                if d.name.startswith("tk8") or d.name.startswith("tk9"):
+                    tk_lib = str(d)
+                    break
+
+    # Strategy 3: Use environment variables
+    if not tcl_lib or not os.path.isdir(tcl_lib):
+        env_tcl = os.environ.get("TCL_LIBRARY", "")
+        if env_tcl and os.path.isdir(env_tcl):
+            tcl_lib = env_tcl
+    if not tk_lib or not os.path.isdir(tk_lib):
+        env_tk = os.environ.get("TK_LIBRARY", "")
+        if env_tk and os.path.isdir(env_tk):
+            tk_lib = env_tk
+
+    return tcl_lib, tk_lib
+
+
+def _ensure_tcl_tk_in_dist(dist_path: Path) -> None:
+    """Post-build: verify TCL/TK data exists in dist, copy manually if missing."""
+    internal = dist_path / "_internal"
+    if not internal.is_dir():
+        return
+
+    tcl_dest = internal / "_tcl_data"
+    tk_dest = internal / "_tk_data"
+
+    if tcl_dest.is_dir() and tk_dest.is_dir():
+        # Check they have content
+        if any(tcl_dest.iterdir()) and any(tk_dest.iterdir()):
+            print(f"  TCL/TK 数据已正确复制到 _internal/")
+            return
+
+    print(f"  [修复] TCL/TK 数据缺失，正在手动复制...")
+    tcl_lib, tk_lib = _find_tcl_tk_dirs()
+
+    if tcl_lib and os.path.isdir(tcl_lib):
+        if tcl_dest.exists():
+            shutil.rmtree(tcl_dest)
+        shutil.copytree(tcl_lib, tcl_dest)
+        print(f"  已复制 TCL: {tcl_lib} -> {tcl_dest}")
+    else:
+        print(f"  [错误] 无法找到 TCL 数据目录!")
+
+    if tk_lib and os.path.isdir(tk_lib):
+        if tk_dest.exists():
+            shutil.rmtree(tk_dest)
+        shutil.copytree(tk_lib, tk_dest)
+        print(f"  已复制 TK: {tk_lib} -> {tk_dest}")
+    else:
+        print(f"  [错误] 无法找到 TK 数据目录!")
+
+
 def build(onedir: bool = False) -> None:
     preflight_check()
 
@@ -173,20 +272,15 @@ def build(onedir: bool = False) -> None:
     # Include TCL/TK data (fixes "Tcl data directory not found" on Windows)
     # PyInstaller 6+ expects these at _tcl_data and _tk_data inside _internal/
     if is_win:
-        try:
-            import tkinter
-            tk_root = tkinter.Tk()
-            tcl_lib = tk_root.tk.exprstring("$tcl_library")
-            tk_lib = tk_root.tk.exprstring("$tk_library")
-            tk_root.destroy()
-            if os.path.isdir(tcl_lib):
-                cmd.extend(["--add-data", f"{tcl_lib}{sep}_tcl_data"])
-                print(f"  TCL data: {tcl_lib}")
-            if os.path.isdir(tk_lib):
-                cmd.extend(["--add-data", f"{tk_lib}{sep}_tk_data"])
-                print(f"  TK data:  {tk_lib}")
-        except Exception as e:
-            print(f"  [警告] 无法自动定位 TCL/TK: {e}")
+        tcl_lib, tk_lib = _find_tcl_tk_dirs()
+        if tcl_lib and os.path.isdir(tcl_lib):
+            cmd.extend(["--add-data", f"{tcl_lib}{sep}_tcl_data"])
+            print(f"  TCL data: {tcl_lib}")
+        if tk_lib and os.path.isdir(tk_lib):
+            cmd.extend(["--add-data", f"{tk_lib}{sep}_tk_data"])
+            print(f"  TK data:  {tk_lib}")
+        if not tcl_lib or not tk_lib:
+            print(f"  [警告] 未找到 TCL/TK 数据目录，构建后将尝试手动复制")
 
     # Windows: embed icon if available
     icon_path = root / "assets" / "icon.ico"
@@ -211,6 +305,10 @@ def build(onedir: bool = False) -> None:
         else:
             suffix = ".exe" if is_win else ""
             out = root / "dist" / f"{APP_NAME}{suffix}"
+
+        # Post-build: ensure TCL/TK data is present (Windows onedir)
+        if is_win and onedir and out.is_dir():
+            _ensure_tcl_tk_in_dist(out)
 
         write_build_sha(out)
 
