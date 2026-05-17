@@ -283,6 +283,12 @@ class PokemonRecorder:
                         self._cb.on_log(f"  [{step_idx+1}/{total_steps}] [验证] {step.verify_page} -> OK")
                     continue
 
+                # Press-only step (no capture)
+                if not step.screenshot_name:
+                    self._click_and_wait(step.button, step.wait_ms or self._wait_ms)
+                    self._cb.on_log(f"  [{step_idx+1}/{total_steps}] 按 {step.button} (无截图)")
+                    continue
+
                 success, img = self._execute_step(step, prev_img)
 
                 if not success:

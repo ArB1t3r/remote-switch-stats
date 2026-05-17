@@ -4,6 +4,7 @@ import os
 import platform
 import subprocess
 import threading
+import tkinter as tk
 from typing import Optional
 
 import customtkinter as ctk
@@ -12,6 +13,25 @@ from PIL import Image, ImageTk
 from src.protocol import SwitchConnection
 from src.recorder import PokemonRecorder, RecorderCallbacks, Step, POKEMON_DETAIL_STEPS
 from src.page_profile import load_profiles
+
+
+ALL_BUTTONS = [
+    "A", "B", "X", "Y",
+    "DUP", "DDOWN", "DLEFT", "DRIGHT",
+    "L", "R", "ZL", "ZR",
+    "PLUS", "MINUS", "HOME", "CAPTURE",
+    "LSTICK", "RSTICK",
+]
+
+
+def _step_display(step: Step) -> str:
+    """Human-readable one-line description of a step."""
+    if step.is_verify:
+        return f"\u2714 验证页面: {step.verify_page}"
+    label = f"按 {step.button}"
+    if step.screenshot_name:
+        label += f"  \u2192  截图 [{step.screenshot_name}]"
+    return label
 
 
 class RecorderView(ctk.CTkFrame):
@@ -25,9 +45,10 @@ class RecorderView(ctk.CTkFrame):
         self._conn = conn
         self._recorder: Optional[PokemonRecorder] = None
         self._photo_ref: Optional[ImageTk.PhotoImage] = None
-        self._edit_mode = False
         self._custom_steps: list[Step] = list(POKEMON_DETAIL_STEPS)
-        self._selected_step_idx: Optional[int] = None
+        self._selected_idx: Optional[int] = None
+        self._drag_idx: Optional[int] = None
+        self._drag_target: Optional[int] = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -48,7 +69,7 @@ class RecorderView(ctk.CTkFrame):
         )
         ctk.CTkLabel(
             sec, font=("", 11), text_color="#9ca3af",
-            text="自动翻页截取每只宝可梦的招式/持有物/队友/能力/EV/特性页面，每只 11 张截图",
+            text="右侧步骤列表可直接编辑：点击选中、拖拽排序、工具栏添加/删除指令",
         ).pack(padx=16, pady=(0, 8), anchor="w")
 
         row = ctk.CTkFrame(sec, fg_color="transparent")
@@ -123,7 +144,7 @@ class RecorderView(ctk.CTkFrame):
         )
         self._progress_label.pack(side="right")
 
-    # ── Main area: preview + step table ────────────────────────────
+    # ── Main area: preview + step editor ─────────────────────────
 
     def _build_main_area(self) -> None:
         main = ctk.CTkFrame(self, corner_radius=12)
@@ -141,7 +162,6 @@ class RecorderView(ctk.CTkFrame):
         ctk.CTkLabel(preview_frame, text="实时预览", font=("", 14, "bold")).grid(
             row=0, column=0, padx=8, pady=(4, 0), sticky="w",
         )
-        import tkinter as tk
         self._preview_canvas = tk.Canvas(
             preview_frame, bg="#0f0f1a", highlightthickness=0,
         )
@@ -151,195 +171,234 @@ class RecorderView(ctk.CTkFrame):
         )
         self._preview_name.grid(row=2, column=0, padx=8, pady=(0, 4))
 
-        # Right: step table with edit mode
-        self._table_frame = ctk.CTkFrame(main, fg_color="transparent")
-        self._table_frame.grid(row=0, column=1, padx=8, pady=8, sticky="nsew")
+        # Right: step editor
+        editor_frame = ctk.CTkFrame(main, fg_color="transparent")
+        editor_frame.grid(row=0, column=1, padx=8, pady=8, sticky="nsew")
+        editor_frame.grid_rowconfigure(2, weight=1)
+        editor_frame.grid_columnconfigure(0, weight=1)
 
-        # Header with edit toggle
-        table_header = ctk.CTkFrame(self._table_frame, fg_color="transparent")
-        table_header.pack(fill="x", padx=8, pady=(4, 4))
-
-        ctk.CTkLabel(table_header, text="采集步骤", font=("", 14, "bold")).pack(
-            side="left",
+        # Header
+        ctk.CTkLabel(editor_frame, text="采集步骤", font=("", 14, "bold")).grid(
+            row=0, column=0, padx=8, pady=(4, 2), sticky="w",
         )
 
-        self._edit_btn = ctk.CTkButton(
-            table_header, text="编辑", width=60, height=26,
-            font=("", 11), fg_color="#6366f1", hover_color="#4f46e5",
-            command=self._toggle_edit_mode,
+        # Toolbar (always visible)
+        self._build_editor_toolbar(editor_frame)
+
+        # Step list
+        self._steps_scroll = ctk.CTkScrollableFrame(editor_frame, fg_color="#1a1a2e")
+        self._steps_scroll.grid(row=2, column=0, padx=4, pady=4, sticky="nsew")
+
+        # Step count label
+        self._step_count_label = ctk.CTkLabel(
+            editor_frame, text="", font=("", 10), text_color="#6b7280",
         )
-        self._edit_btn.pack(side="right", padx=4)
-
-        # Edit toolbar (hidden until edit mode)
-        self._edit_toolbar = ctk.CTkFrame(self._table_frame, fg_color="transparent")
-
-        ctk.CTkButton(
-            self._edit_toolbar, text="+验证", width=60, height=24,
-            font=("", 10), fg_color="#22c55e", hover_color="#16a34a",
-            command=self._insert_verify_step,
-        ).pack(side="left", padx=2)
-
-        ctk.CTkButton(
-            self._edit_toolbar, text="+按键", width=60, height=24,
-            font=("", 10), fg_color="#3b82f6", hover_color="#2563eb",
-            command=self._insert_press_step,
-        ).pack(side="left", padx=2)
-
-        ctk.CTkButton(
-            self._edit_toolbar, text="删除", width=50, height=24,
-            font=("", 10), fg_color="#ef4444", hover_color="#dc2626",
-            command=self._delete_selected_step,
-        ).pack(side="left", padx=2)
-
-        ctk.CTkButton(
-            self._edit_toolbar, text="上移", width=40, height=24,
-            font=("", 10), fg_color="#6b7280", hover_color="#4b5563",
-            command=self._move_step_up,
-        ).pack(side="left", padx=2)
-
-        ctk.CTkButton(
-            self._edit_toolbar, text="下移", width=40, height=24,
-            font=("", 10), fg_color="#6b7280", hover_color="#4b5563",
-            command=self._move_step_down,
-        ).pack(side="left", padx=2)
-
-        ctk.CTkButton(
-            self._edit_toolbar, text="重置", width=50, height=24,
-            font=("", 10), fg_color="#92400e", hover_color="#78350f",
-            command=self._reset_steps,
-        ).pack(side="right", padx=2)
-
-        # Step list (scrollable)
-        self._step_labels: list[ctk.CTkLabel] = []
-        self._steps_scroll = ctk.CTkScrollableFrame(self._table_frame, fg_color="transparent")
-        self._steps_scroll.pack(fill="both", expand=True, padx=4, pady=4)
+        self._step_count_label.grid(row=3, column=0, padx=8, pady=(2, 4), sticky="w")
 
         self._render_step_list()
 
-    # ── Step list rendering ────────────────────────────────────────
+    def _build_editor_toolbar(self, parent: ctk.CTkFrame) -> None:
+        bar = ctk.CTkFrame(parent, fg_color="#1e1b4b", corner_radius=8, height=36)
+        bar.grid(row=1, column=0, padx=4, pady=(2, 4), sticky="ew")
+
+        ctk.CTkButton(
+            bar, text="+ 按键", width=60, height=26,
+            font=("", 10, "bold"), fg_color="#3b82f6", hover_color="#2563eb",
+            command=self._add_press_step,
+        ).pack(side="left", padx=(6, 2), pady=5)
+
+        ctk.CTkButton(
+            bar, text="+ 验证", width=60, height=26,
+            font=("", 10, "bold"), fg_color="#8b5cf6", hover_color="#7c3aed",
+            command=self._add_verify_step,
+        ).pack(side="left", padx=2, pady=5)
+
+        ctk.CTkButton(
+            bar, text="\u2716", width=30, height=26,
+            font=("", 12), fg_color="#ef4444", hover_color="#dc2626",
+            command=self._delete_selected,
+        ).pack(side="left", padx=(8, 2), pady=5)
+
+        ctk.CTkButton(
+            bar, text="\u25b2", width=28, height=26,
+            font=("", 11), fg_color="#6b7280", hover_color="#4b5563",
+            command=self._move_up,
+        ).pack(side="left", padx=1, pady=5)
+
+        ctk.CTkButton(
+            bar, text="\u25bc", width=28, height=26,
+            font=("", 11), fg_color="#6b7280", hover_color="#4b5563",
+            command=self._move_down,
+        ).pack(side="left", padx=1, pady=5)
+
+        ctk.CTkButton(
+            bar, text="重置默认", width=70, height=26,
+            font=("", 10), fg_color="#92400e", hover_color="#78350f",
+            command=self._reset_steps,
+        ).pack(side="right", padx=(2, 6), pady=5)
+
+    # ── Step list rendering ──────────────────────────────────────
 
     def _render_step_list(self) -> None:
         for w in self._steps_scroll.winfo_children():
             w.destroy()
-        self._step_labels.clear()
 
         for i, step in enumerate(self._custom_steps):
-            row = ctk.CTkFrame(self._steps_scroll, fg_color="transparent", height=26)
+            is_selected = (i == self._selected_idx)
+            is_drag_target = (i == self._drag_target)
+
+            row = ctk.CTkFrame(
+                self._steps_scroll, height=32, corner_radius=6,
+                fg_color="#4f46e5" if is_selected else ("#334155" if is_drag_target else "transparent"),
+                border_width=1 if is_drag_target else 0,
+                border_color="#6366f1" if is_drag_target else "transparent",
+            )
             row.pack(fill="x", padx=2, pady=1)
+            row.pack_propagate(False)
 
-            is_selected = (self._edit_mode and i == self._selected_step_idx)
+            # Index number
+            idx_lbl = ctk.CTkLabel(
+                row, text=f"{i+1:2d}.", width=28,
+                font=("Consolas", 10), text_color="#6b7280",
+            )
+            idx_lbl.pack(side="left", padx=(4, 0))
 
+            # Step type indicator
             if step.is_verify:
-                text = f"  \u2714 [验证] {step.verify_page}"
-                color = "#a78bfa" if not is_selected else "#ffffff"
+                type_color = "#a78bfa"
+                type_text = "验证"
             else:
-                text = f"  {step.screenshot_name}"
-                color = "#6b7280" if not is_selected else "#ffffff"
-
-            bg = "#4f46e5" if is_selected else "transparent"
-
-            lbl = ctk.CTkLabel(
-                row, text=text, font=("Consolas", 11),
-                text_color=color, anchor="w", fg_color=bg,
-                corner_radius=4,
+                type_color = "#38bdf8"
+                type_text = step.button
+            type_lbl = ctk.CTkLabel(
+                row, text=type_text, width=50,
+                font=("Consolas", 10, "bold"), text_color=type_color,
             )
-            lbl.pack(side="left", fill="x", expand=True)
+            type_lbl.pack(side="left", padx=(2, 4))
 
-            if self._edit_mode:
-                lbl.bind("<Button-1>", lambda e, idx=i: self._select_step(idx))
-
-            btn_text = step.button if not step.is_verify else ""
-            btn_lbl = ctk.CTkLabel(
-                row, text=btn_text, font=("Consolas", 10),
-                text_color="#4b5563", width=60,
+            # Description
+            desc = step.verify_page if step.is_verify else step.screenshot_name
+            text_color = "#e2e8f0" if is_selected else "#cbd5e1"
+            desc_lbl = ctk.CTkLabel(
+                row, text=desc, anchor="w",
+                font=("Consolas", 11), text_color=text_color,
             )
-            btn_lbl.pack(side="right")
+            desc_lbl.pack(side="left", fill="x", expand=True, padx=2)
 
-            self._step_labels.append(lbl)
+            # Drag handle
+            handle = ctk.CTkLabel(
+                row, text="\u2630", width=20,
+                font=("", 12), text_color="#4b5563", cursor="hand2",
+            )
+            handle.pack(side="right", padx=(2, 6))
 
-    def _select_step(self, idx: int) -> None:
-        self._selected_step_idx = idx
+            # Bind click to select
+            for widget in (row, idx_lbl, type_lbl, desc_lbl):
+                widget.bind("<Button-1>", lambda e, idx=i: self._on_click(idx))
+
+            # Bind drag on handle
+            handle.bind("<Button-1>", lambda e, idx=i: self._on_drag_start(e, idx))
+            handle.bind("<B1-Motion>", self._on_drag_motion)
+            handle.bind("<ButtonRelease-1>", self._on_drag_end)
+
+        self._step_count_label.configure(
+            text=f"共 {len(self._custom_steps)} 步  |  点击选中 · 拖拽 \u2630 排序"
+        )
+
+    def _on_click(self, idx: int) -> None:
+        self._selected_idx = idx if self._selected_idx != idx else None
         self._render_step_list()
 
-    # ── Edit mode ────────────────────────────────────────────────────
+    def _on_drag_start(self, event: tk.Event, idx: int) -> None:
+        self._drag_idx = idx
+        self._selected_idx = idx
+        self._drag_target = None
 
-    def _toggle_edit_mode(self) -> None:
-        self._edit_mode = not self._edit_mode
-        if self._edit_mode:
-            self._edit_btn.configure(text="完成", fg_color="#22c55e", hover_color="#16a34a")
-            self._edit_toolbar.pack(fill="x", padx=8, pady=(0, 4), after=self._edit_toolbar.master.winfo_children()[0])
-            # Re-pack toolbar right after header
-            self._edit_toolbar.pack_forget()
-            self._edit_toolbar.pack(fill="x", padx=8, pady=(0, 4), before=self._steps_scroll)
-        else:
-            self._edit_btn.configure(text="编辑", fg_color="#6366f1", hover_color="#4f46e5")
-            self._edit_toolbar.pack_forget()
-            self._selected_step_idx = None
-        self._render_step_list()
-
-    def _insert_verify_step(self) -> None:
-        """Insert a verify step after the selected step (or at end)."""
-        profiles = load_profiles()
-        if not profiles:
-            self._log("没有已保存的页面配置，请先到「页面配置」标签页创建")
+    def _on_drag_motion(self, event: tk.Event) -> None:
+        if self._drag_idx is None:
+            return
+        # Determine target index based on mouse y position relative to scroll frame
+        children = self._steps_scroll.winfo_children()
+        if not children:
             return
 
-        insert_idx = (self._selected_step_idx + 1) if self._selected_step_idx is not None else len(self._custom_steps)
+        # Get mouse y relative to the scroll frame
+        try:
+            y = event.widget.winfo_pointery() - self._steps_scroll.winfo_rooty()
+        except Exception:
+            return
 
-        # Show a dialog to pick the page name
-        dialog = _PagePickerDialog(self, profiles=[p.name for p in profiles])
-        self.wait_window(dialog)
+        row_h = 34  # approximate row height
+        target = max(0, min(len(self._custom_steps) - 1, int(y / row_h)))
 
-        if dialog.result:
-            step = Step(
-                button="", screenshot_name="",
-                action="verify", verify_page=dialog.result,
-            )
-            self._custom_steps.insert(insert_idx, step)
-            self._selected_step_idx = insert_idx
+        if target != self._drag_target:
+            self._drag_target = target
             self._render_step_list()
 
-    def _insert_press_step(self) -> None:
-        """Insert a button-press step after the selected step (or at end)."""
-        insert_idx = (self._selected_step_idx + 1) if self._selected_step_idx is not None else len(self._custom_steps)
+    def _on_drag_end(self, event: tk.Event) -> None:
+        if self._drag_idx is not None and self._drag_target is not None:
+            if self._drag_idx != self._drag_target:
+                step = self._custom_steps.pop(self._drag_idx)
+                self._custom_steps.insert(self._drag_target, step)
+                self._selected_idx = self._drag_target
+        self._drag_idx = None
+        self._drag_target = None
+        self._render_step_list()
 
+    # ── Editor actions ───────────────────────────────────────────
+
+    def _add_press_step(self) -> None:
         dialog = _PressStepDialog(self)
         self.wait_window(dialog)
-
         if dialog.result:
-            button, name = dialog.result
-            step = Step(button=button, screenshot_name=name)
-            self._custom_steps.insert(insert_idx, step)
-            self._selected_step_idx = insert_idx
+            button, name, capture = dialog.result
+            step = Step(button=button, screenshot_name=name if capture else "")
+            insert_at = (self._selected_idx + 1) if self._selected_idx is not None else len(self._custom_steps)
+            self._custom_steps.insert(insert_at, step)
+            self._selected_idx = insert_at
             self._render_step_list()
 
-    def _delete_selected_step(self) -> None:
-        if self._selected_step_idx is None:
+    def _add_verify_step(self) -> None:
+        profiles = load_profiles()
+        if not profiles:
+            self._log("没有已配置的页面，请先到「页面配置」标签页创建")
             return
-        del self._custom_steps[self._selected_step_idx]
-        if self._selected_step_idx >= len(self._custom_steps):
-            self._selected_step_idx = len(self._custom_steps) - 1 if self._custom_steps else None
+        dialog = _PagePickerDialog(self, profiles=[p.name for p in profiles])
+        self.wait_window(dialog)
+        if dialog.result:
+            step = Step(button="", screenshot_name="", action="verify", verify_page=dialog.result)
+            insert_at = (self._selected_idx + 1) if self._selected_idx is not None else len(self._custom_steps)
+            self._custom_steps.insert(insert_at, step)
+            self._selected_idx = insert_at
+            self._render_step_list()
+
+    def _delete_selected(self) -> None:
+        if self._selected_idx is None:
+            return
+        del self._custom_steps[self._selected_idx]
+        if self._selected_idx >= len(self._custom_steps):
+            self._selected_idx = len(self._custom_steps) - 1 if self._custom_steps else None
         self._render_step_list()
 
-    def _move_step_up(self) -> None:
-        idx = self._selected_step_idx
+    def _move_up(self) -> None:
+        idx = self._selected_idx
         if idx is None or idx == 0:
             return
         self._custom_steps[idx - 1], self._custom_steps[idx] = self._custom_steps[idx], self._custom_steps[idx - 1]
-        self._selected_step_idx = idx - 1
+        self._selected_idx = idx - 1
         self._render_step_list()
 
-    def _move_step_down(self) -> None:
-        idx = self._selected_step_idx
+    def _move_down(self) -> None:
+        idx = self._selected_idx
         if idx is None or idx >= len(self._custom_steps) - 1:
             return
         self._custom_steps[idx + 1], self._custom_steps[idx] = self._custom_steps[idx], self._custom_steps[idx + 1]
-        self._selected_step_idx = idx + 1
+        self._selected_idx = idx + 1
         self._render_step_list()
 
     def _reset_steps(self) -> None:
         self._custom_steps = list(POKEMON_DETAIL_STEPS)
-        self._selected_step_idx = None
+        self._selected_idx = None
         self._render_step_list()
 
     # ── Log ────────────────────────────────────────────────────────
@@ -366,6 +425,10 @@ class RecorderView(ctk.CTkFrame):
     def _do_start(self) -> None:
         if not self._conn.connected:
             self._log("未连接到 Switch，请先在「设置与连接」页连接")
+            return
+
+        if not self._custom_steps:
+            self._log("步骤列表为空，请添加至少一个步骤")
             return
 
         try:
@@ -445,16 +508,6 @@ class RecorderView(ctk.CTkFrame):
             text=f"Pokemon {poke_idx}/{poke_total}  |  步骤 {step_idx}/{step_total}",
         )
 
-        for i, lbl in enumerate(self._step_labels):
-            if i == step_idx - 1:
-                lbl.configure(text_color="#6366f1", font=("Consolas", 11, "bold"))
-            elif i < step_idx - 1:
-                lbl.configure(text_color="#22c55e", font=("Consolas", 11))
-            else:
-                step = self._custom_steps[i] if i < len(self._custom_steps) else None
-                color = "#a78bfa" if (step and step.is_verify) else "#6b7280"
-                lbl.configure(text_color=color, font=("Consolas", 11))
-
     def _show_preview(self, img: Image.Image, name: str) -> None:
         cw = max(self._preview_canvas.winfo_width(), 320)
         ch = max(self._preview_canvas.winfo_height(), 180)
@@ -503,7 +556,7 @@ class _PagePickerDialog(ctk.CTkToplevel):
     def __init__(self, parent: ctk.CTkBaseClass, profiles: list[str]) -> None:
         super().__init__(parent)
         self.title("选择验证页面")
-        self.geometry("300x200")
+        self.geometry("300x220")
         self.resizable(False, False)
         self.result: Optional[str] = None
 
@@ -514,20 +567,15 @@ class _PagePickerDialog(ctk.CTkToplevel):
             padx=16, pady=(16, 8), anchor="w",
         )
 
-        self._listbox_frame = ctk.CTkScrollableFrame(self, height=100)
-        self._listbox_frame.pack(fill="x", padx=16, pady=4)
-
-        self._selected: Optional[str] = None
-        self._buttons: list[ctk.CTkButton] = []
+        scroll = ctk.CTkScrollableFrame(self, height=120)
+        scroll.pack(fill="x", padx=16, pady=4)
 
         for name in profiles:
-            btn = ctk.CTkButton(
-                self._listbox_frame, text=name, height=28,
+            ctk.CTkButton(
+                scroll, text=name, height=30, anchor="w",
                 fg_color="#334155", hover_color="#475569",
                 command=lambda n=name: self._pick(n),
-            )
-            btn.pack(fill="x", padx=4, pady=2)
-            self._buttons.append(btn)
+            ).pack(fill="x", padx=4, pady=2)
 
     def _pick(self, name: str) -> None:
         self.result = name
@@ -535,41 +583,53 @@ class _PagePickerDialog(ctk.CTkToplevel):
 
 
 class _PressStepDialog(ctk.CTkToplevel):
-    """Modal dialog to add a button-press step."""
-
-    COMMON_BUTTONS = ["A", "B", "X", "Y", "DUP", "DDOWN", "DLEFT", "DRIGHT", "L", "R", "ZL", "ZR", "PLUS", "MINUS"]
+    """Modal dialog to add a button-press + optional capture step."""
 
     def __init__(self, parent: ctk.CTkBaseClass) -> None:
         super().__init__(parent)
-        self.title("添加按键步骤")
-        self.geometry("320x220")
+        self.title("添加按键指令")
+        self.geometry("340x280")
         self.resizable(False, False)
-        self.result: Optional[tuple[str, str]] = None
+        self.result: Optional[tuple[str, str, bool]] = None  # (button, name, capture)
 
         self.grab_set()
         self.focus_set()
 
+        # Button selection
         ctk.CTkLabel(self, text="按键:", font=("", 13)).pack(padx=16, pady=(16, 4), anchor="w")
         self._btn_var = ctk.StringVar(value="A")
-        btn_menu = ctk.CTkOptionMenu(
+        ctk.CTkOptionMenu(
             self, variable=self._btn_var,
-            values=self.COMMON_BUTTONS, width=200,
-        )
-        btn_menu.pack(padx=16, pady=(0, 8), anchor="w")
+            values=ALL_BUTTONS, width=200,
+        ).pack(padx=16, pady=(0, 8), anchor="w")
 
+        # Capture toggle
+        self._capture_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            self, text="按键后截图", variable=self._capture_var,
+            command=self._toggle_capture,
+        ).pack(padx=16, pady=(4, 4), anchor="w")
+
+        # Screenshot name
         ctk.CTkLabel(self, text="截图名称:", font=("", 13)).pack(padx=16, pady=(8, 4), anchor="w")
-        self._name_entry = ctk.CTkEntry(self, width=200, placeholder_text="例: custom_page")
+        self._name_entry = ctk.CTkEntry(self, width=220, placeholder_text="例: moves_page_1")
         self._name_entry.pack(padx=16, pady=(0, 12), anchor="w")
 
         ctk.CTkButton(
-            self, text="确定", width=100, fg_color="#6366f1", hover_color="#4f46e5",
+            self, text="确定添加", width=120,
+            fg_color="#6366f1", hover_color="#4f46e5",
             command=self._confirm,
         ).pack(pady=(8, 16))
 
+    def _toggle_capture(self) -> None:
+        state = "normal" if self._capture_var.get() else "disabled"
+        self._name_entry.configure(state=state)
+
     def _confirm(self) -> None:
         button = self._btn_var.get()
-        name = self._name_entry.get().strip()
-        if not name:
-            name = f"step_{button.lower()}"
-        self.result = (button, name)
+        capture = self._capture_var.get()
+        name = self._name_entry.get().strip() if capture else ""
+        if capture and not name:
+            name = f"cap_{button.lower()}"
+        self.result = (button, name, capture)
         self.destroy()
