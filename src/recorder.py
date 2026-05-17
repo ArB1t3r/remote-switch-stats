@@ -48,6 +48,15 @@ POKEMON_DETAIL_STEPS: list[Step] = [
 EXIT_BUTTON = "B"
 NEXT_POKEMON_BUTTON = "DDOWN"
 
+# Crop regions used to verify we're back on the list page (1280x720 coordinates).
+# These regions contain stable UI elements that don't change between pokemon.
+LIST_PAGE_VERIFY_REGIONS = [
+    (100, 295, 280, 345),   # "X 单打对战" button area
+    (590, 22, 900, 60),     # "训练家 好友 宝可梦" tab bar
+]
+
+LIST_PAGE_MATCH_THRESHOLD = 0.03  # max RMSE to consider regions matching
+
 
 # ── Image utilities ─────────────────────────────────────────────────
 
@@ -64,6 +73,37 @@ def decode_pixel_peek(data: bytes) -> Optional[Image.Image]:
         return Image.open(io.BytesIO(bytes.fromhex(hex_str)))
     except Exception:
         return None
+
+
+def region_match_score(img_a: Image.Image, img_b: Image.Image, region: tuple[int, int, int, int]) -> float:
+    """Compare a specific region (x1, y1, x2, y2) between two images. Returns RMSE 0.0~1.0."""
+    crop_a = img_a.crop(region).convert("RGB")
+    crop_b = img_b.crop(region).convert("RGB")
+
+    if crop_a.size != crop_b.size:
+        crop_b = crop_b.resize(crop_a.size)
+
+    pa = list(crop_a.getdata())
+    pb = list(crop_b.getdata())
+
+    if not pa:
+        return 1.0
+
+    mse = sum(
+        (ra - rb) ** 2 + (ga - gb) ** 2 + (ba - bb) ** 2
+        for (ra, ga, ba), (rb, gb, bb) in zip(pa, pb)
+    ) / (len(pa) * 3)
+
+    return math.sqrt(mse) / 255.0
+
+
+def is_list_page(current_img: Image.Image, reference_img: Image.Image) -> bool:
+    """Check if current screenshot matches the list page by comparing stable UI regions."""
+    for region in LIST_PAGE_VERIFY_REGIONS:
+        score = region_match_score(current_img, reference_img, region)
+        if score > LIST_PAGE_MATCH_THRESHOLD:
+            return False
+    return True
 
 
 def image_diff_score(img_a: Image.Image, img_b: Image.Image) -> float:
@@ -165,6 +205,16 @@ class PokemonRecorder:
         self._cb.on_log(f"开始采集 {self._pokemon_count} 只宝可梦")
         self._cb.on_log(f"保存目录: {self._session_dir}")
 
+        # Capture the list page as reference for verification
+        self._cb.on_log("正在捕捉列表页面参考图...")
+        time.sleep(0.3)
+        self._list_reference = self._capture()
+        if self._list_reference is None:
+            self._cb.on_error("无法截取参考图，请确保已连接并在宝可梦列表页面")
+            self._running = False
+            return
+        self._cb.on_log("  列表页参考图已保存，将用于页面验证")
+
         for poke_idx in range(self._pokemon_count):
             if not self._running:
                 break
@@ -197,7 +247,6 @@ class PokemonRecorder:
                     self._wait_if_paused()
                     if not self._running:
                         break
-                    # user resumed — try to capture whatever is on screen
                     img = self._capture()
 
                 if img is not None:
@@ -212,11 +261,18 @@ class PokemonRecorder:
             if not self._running:
                 break
 
-            # Exit detail page and move to next Pokemon
-            self._cb.on_log(f"  返回列表 (B) + 下一只 (DDOWN)")
-            self._click_and_wait(EXIT_BUTTON, self._wait_ms)
+            # Exit detail page and verify we're back on the list page
+            self._cb.on_log(f"  返回列表 (B)...")
+            if not self._exit_to_list():
+                self._cb.on_error(f"Pokemon #{poke_num}: 无法确认已返回列表页，已暂停")
+                self._paused = True
+                self._wait_if_paused()
+                if not self._running:
+                    break
 
+            # Move to next Pokemon
             if poke_idx < self._pokemon_count - 1:
+                self._cb.on_log(f"  选择下一只 (DDOWN)")
                 self._click_and_wait(NEXT_POKEMON_BUTTON, self._wait_ms)
 
         self._running = False
@@ -256,6 +312,33 @@ class PokemonRecorder:
             time.sleep(0.3)
 
         return False, self._capture()
+
+    # ── List page verification ────────────────────────────────────────
+
+    def _exit_to_list(self) -> bool:
+        """Press B and verify we returned to the list page using image comparison."""
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            self._click_and_wait(EXIT_BUTTON, 800)  # longer wait for page transition
+            img = self._capture()
+            if img is None:
+                self._cb.on_log(f"    退出尝试 {attempt}: 截图失败")
+                continue
+
+            if self._list_reference and is_list_page(img, self._list_reference):
+                if attempt > 1:
+                    self._cb.on_log(f"    第 {attempt} 次尝试后确认回到列表页")
+                else:
+                    self._cb.on_log(f"    已确认回到列表页")
+                # Update reference (list selection might have moved)
+                self._list_reference = img
+                return True
+
+            self._cb.on_log(f"    退出尝试 {attempt}: 未检测到列表页面，再按 B...")
+            time.sleep(0.3)
+
+        self._cb.on_log(f"    {max_attempts} 次尝试后仍未回到列表页")
+        return False
 
     # ── Helpers ─────────────────────────────────────────────────────
 
