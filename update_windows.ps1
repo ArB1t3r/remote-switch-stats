@@ -7,6 +7,17 @@
 
 $ErrorActionPreference = "Continue"
 
+# CRITICAL: Strip TCL/TK env vars that may be inherited from a running
+# PyInstaller bundle. They would point at the bundle's _internal/_tcl_data
+# and break the Python tkinter import during build.
+$envVarsToClean = @("TCL_LIBRARY", "TK_LIBRARY", "TCL_LIBRARY_PATH", "TIX_LIBRARY")
+foreach ($v in $envVarsToClean) {
+    if (Test-Path "Env:$v") {
+        Write-Host "  [Cleanup] Removed inherited env: $v" -ForegroundColor DarkGray
+        Remove-Item -Path "Env:$v"
+    }
+}
+
 $OWNER = "ArB1t3r"
 $REPO = "remote-switch-stats"
 $BRANCH = "main"

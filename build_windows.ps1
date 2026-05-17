@@ -4,6 +4,15 @@
 
 $ErrorActionPreference = "Continue"
 
+# CRITICAL: Strip TCL/TK env vars (see comment in update_windows.ps1).
+$envVarsToClean = @("TCL_LIBRARY", "TK_LIBRARY", "TCL_LIBRARY_PATH", "TIX_LIBRARY")
+foreach ($v in $envVarsToClean) {
+    if (Test-Path "Env:$v") {
+        Write-Host "  [Cleanup] Removed inherited env: $v" -ForegroundColor DarkGray
+        Remove-Item -Path "Env:$v"
+    }
+}
+
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "  Switch Remote Control - Windows Build Tool" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan

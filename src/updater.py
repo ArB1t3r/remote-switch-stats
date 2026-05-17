@@ -145,6 +145,14 @@ def launch_updater_script() -> bool:
     if not script:
         return False
 
+    # CRITICAL: Strip TCL/TK env vars set by the PyInstaller runtime hook.
+    # If we don't, the spawned PowerShell -> python build.py inherits a
+    # TCL_LIBRARY that points into our bundled _internal/_tcl_data, causing
+    # tkinter.Tcl() to fail during the rebuild.
+    clean_env = os.environ.copy()
+    for var in ("TCL_LIBRARY", "TK_LIBRARY", "TCL_LIBRARY_PATH", "TIX_LIBRARY"):
+        clean_env.pop(var, None)
+
     subprocess.Popen(
         [
             "powershell",
@@ -152,6 +160,7 @@ def launch_updater_script() -> bool:
             "-File", str(script),
         ],
         cwd=str(script.parent),
+        env=clean_env,
         creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
     )
     return True

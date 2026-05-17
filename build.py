@@ -9,13 +9,26 @@
 Windows 用户请直接双击 build_windows.bat，会自动处理所有环境依赖。
 """
 
+import os
+import sys
+
+# CRITICAL: Strip polluted TCL/TK env vars BEFORE importing tkinter.
+# Background: when this script is invoked from the auto-updater spawned by a
+# running PyInstaller bundle, the bundle's runtime hook has set TCL_LIBRARY to
+# point at the bundle's _internal/_tcl_data, which gets inherited by all child
+# processes. tkinter.Tcl() then tries to initialize from that path and fails.
+# Removing these env vars forces tkinter to use the system's default Python
+# installation, which is what we want during the build.
+for _polluted in ("TCL_LIBRARY", "TK_LIBRARY", "TCL_LIBRARY_PATH", "TIX_LIBRARY"):
+    val = os.environ.pop(_polluted, None)
+    if val:
+        print(f"  [清理] 已移除污染的环境变量 {_polluted}={val}")
+
 import argparse
 import json
-import os
 import platform
 import shutil
 import subprocess
-import sys
 import urllib.request
 from pathlib import Path
 
