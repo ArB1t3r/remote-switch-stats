@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""
+打包脚本 — 将 Switch Remote Control 打包为独立可执行文件。
+
+用法:
+    python build.py            # 默认打包
+    python build.py --onedir   # 打包为文件夹模式（启动更快）
+
+Windows 用户请直接双击 build_windows.bat，会自动处理所有环境依赖。
+"""
+
+import argparse
+import platform
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+APP_NAME = "SwitchRemote"
+ENTRY = "main.py"
+
+HIDDEN_IMPORTS = [
+    "customtkinter",
+    "PIL",
+    "PIL.Image",
+    "PIL.ImageTk",
+]
+
+COLLECT_PACKAGES = [
+    "customtkinter",
+]
+
+
+def preflight_check() -> None:
+    """Verify the environment before building."""
+    errors: list[str] = []
+
+    # Python version
+    if sys.version_info < (3, 10):
+        errors.append(
+            f"Python 版本过低: {sys.version.split()[0]}，需要 3.10+"
+        )
+
+    # tkinter
+    try:
+        import tkinter  # noqa: F401
+    except ImportError:
+        errors.append(
+            "tkinter 不可用。Windows 上请重新安装 Python 并勾选 tcl/tk 组件"
+        )
+
+    # pyinstaller
+    try:
+        import PyInstaller  # noqa: F401
+    except ImportError:
+        errors.append(
+            "PyInstaller 未安装。请运行: pip install pyinstaller"
+        )
+
+    # project deps
+    for mod_name, pkg_name in [("customtkinter", "customtkinter"), ("PIL", "Pillow")]:
+        try:
+            __import__(mod_name)
+        except ImportError:
+            errors.append(f"{pkg_name} 未安装。请运行: pip install -r requirements.txt")
+
+    if errors:
+        print("\n[环境检查失败]\n")
+        for i, e in enumerate(errors, 1):
+            print(f"  {i}. {e}")
+        print()
+        sys.exit(1)
+
+
+def build(onedir: bool = False) -> None:
+    preflight_check()
+
+    root = Path(__file__).parent.resolve()
+    entry = root / ENTRY
+
+    if not entry.exists():
+        print(f"[错误] 找不到入口文件: {entry}")
+        sys.exit(1)
+
+    is_mac = platform.system() == "Darwin"
+    is_win = platform.system() == "Windows"
+
+    # macOS: onefile+windowed is deprecated in PyInstaller 7
+    if is_mac and not onedir:
+        print("[提示] macOS 上自动切换为 onedir 模式")
+        onedir = True
+
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--windowed",
+        f"--name={APP_NAME}",
+    ]
+
+    if onedir:
+        cmd.append("--onedir")
+    else:
+        cmd.append("--onefile")
+
+    for pkg in COLLECT_PACKAGES:
+        cmd.extend(["--collect-all", pkg])
+
+    for imp in HIDDEN_IMPORTS:
+        cmd.extend(["--hidden-import", imp])
+
+    sep = ";" if is_win else ":"
+    cmd.extend(["--add-data", f"src{sep}src"])
+
+    # Windows: embed icon if available
+    icon_path = root / "assets" / "icon.ico"
+    if is_win and icon_path.exists():
+        cmd.extend(["--icon", str(icon_path)])
+
+    cmd.append(str(entry))
+
+    print("=" * 60)
+    print(f"  应用名称: {APP_NAME}")
+    print(f"  打包模式: {'文件夹 (onedir)' if onedir else '单文件 (onefile)'}")
+    print(f"  目标平台: {platform.system()} {platform.machine()}")
+    print(f"  Python:   {sys.version.split()[0]}")
+    print("=" * 60)
+    print(f"\n执行命令:\n  {' '.join(cmd)}\n")
+
+    result = subprocess.run(cmd, cwd=str(root))
+
+    if result.returncode == 0:
+        if onedir:
+            out = root / "dist" / APP_NAME
+        else:
+            suffix = ".exe" if is_win else ""
+            out = root / "dist" / f"{APP_NAME}{suffix}"
+        print("\n" + "=" * 60)
+        print("  打包成功!")
+        print(f"  输出路径: {out}")
+        if not onedir and is_win:
+            size_mb = out.stat().st_size / (1024 * 1024)
+            print(f"  文件大小: {size_mb:.1f} MB")
+        print("=" * 60)
+    else:
+        print(f"\n[错误] 打包失败，退出码: {result.returncode}")
+        sys.exit(result.returncode)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="打包 Switch Remote Control")
+    parser.add_argument(
+        "--onedir", action="store_true",
+        help="使用文件夹模式（启动更快，但输出为整个目录）",
+    )
+    args = parser.parse_args()
+    build(onedir=args.onedir)
