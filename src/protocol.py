@@ -151,42 +151,51 @@ class SwitchConnection:
 
     def send_command(self, cmd: str, wait_response: bool = True) -> str:
         """Send an ASCII command, return the response line (stripped)."""
+        sent = False
         with self._lock:
             if not self._sock:
                 return "[未连接]"
             try:
                 payload = (cmd.strip() + "\r\n").encode("ascii")
                 self._sock.sendall(payload)
+                sent = True
                 if not wait_response:
                     return ""
                 return self._recv_line()
-            except (socket.timeout, OSError) as e:
+            except socket.timeout:
+                if sent:
+                    return "[超时] 命令已发送但未收到回应"
                 self._notify(False)
-                pass
+            except OSError:
+                self._notify(False)
 
         if not wait_response:
             return "[发送失败]"
 
-        # Auto-reconnect only for commands that expect a response
-        if self._auto_reconnect and self._ip:
+        # Only reconnect+retry if the command was NOT sent (connection lost before send)
+        if not sent and self._auto_reconnect and self._ip:
             if self._try_reconnect():
                 return self.send_command(cmd, wait_response)
-        return "[通信错误] 连接已断开，重连失败"
+        return "[通信错误] 连接已断开" if not sent else "[超时]"
 
     def send_command_raw(self, cmd: str) -> bytes:
         """Send command and return raw bytes (for pixelPeek)."""
+        sent = False
         with self._lock:
             if not self._sock:
                 return b""
             try:
                 self._sock.sendall((cmd.strip() + "\r\n").encode("ascii"))
+                sent = True
                 return self._recv_raw()
-            except (socket.timeout, OSError):
+            except socket.timeout:
+                if sent:
+                    return b""
                 self._notify(False)
-                pass
+            except OSError:
+                self._notify(False)
 
-        # Auto-reconnect outside the lock
-        if self._auto_reconnect and self._ip:
+        if not sent and self._auto_reconnect and self._ip:
             if self._try_reconnect():
                 return self.send_command_raw(cmd)
         return b""
